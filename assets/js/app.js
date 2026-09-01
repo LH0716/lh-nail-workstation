@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.87',
+  appVersion: '1.0.88',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -9886,8 +9886,15 @@ function clearAllData() {
     State[k] = null;
   });
   // 🔥 同步清空云端业务数据（权威覆盖，防止旧数据从云端再次拉回复活）
-  _pushCloudClear();
-  alert('✅ 已清空所有业务数据（账号与配置保留），页面将重新加载');
+  // ⚠️ 必须等云端清空请求全部完成后再刷新页面：否则刷新会中断请求，云端旧数据会在下次打开时被拉回
+  clearAllDataSync();
+}
+
+async function clearAllDataSync() {
+  const ok = await _pushCloudClear();
+  alert(ok
+    ? '✅ 已清空所有业务数据（账号与配置保留），页面将重新加载'
+    : '⚠️ 本地已清空，但云端清空未完成（网络异常）。页面将重新加载，若数据仍存在请再次重试');
   location.reload();
 }
 
@@ -9895,23 +9902,23 @@ function clearAllData() {
 async function _pushCloudClear() {
   try {
     const cfg = getSupabaseConfig();
-    if (!cfg.enabled || !cfg.url || !cfg.anonKey) return;
+    if (!cfg.enabled || !cfg.url || !cfg.anonKey) return false;
     const endpoint = cfg.url.replace(/\/+$/, '') + '/rest/v1/' + (cfg.table || 'lh_nail_sync');
-    for (const k of CLEAR_DATA_KEYS) {
-      try {
-        await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'apikey': cfg.anonKey,
-            'Authorization': 'Bearer ' + cfg.anonKey,
-            'Content-Type': 'application/json',
-            'Prefer': 'resolution=merge-duplicates'
-          },
-          body: JSON.stringify([{ workspace_id: cfg.workspaceId, data_key: k, data: [], updated_at: new Date().toISOString() }])
-        });
-      } catch(e) {}
-    }
-  } catch(e) {}
+    const tasks = CLEAR_DATA_KEYS.map(k => {
+      return fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'apikey': cfg.anonKey,
+          'Authorization': 'Bearer ' + cfg.anonKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates'
+        },
+        body: JSON.stringify([{ workspace_id: cfg.workspaceId, data_key: k, data: [], updated_at: new Date().toISOString() }])
+      }).then(r => ({ k, ok: r.ok })).catch(() => ({ k, ok: false }));
+    });
+    const results = await Promise.all(tasks);
+    return results.every(r => r.ok);
+  } catch(e) { return false; }
 }
 
 /* ============================================================
