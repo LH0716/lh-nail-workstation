@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.88',
+  appVersion: '1.0.89',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -603,13 +603,42 @@ window.SupabaseSync = {
     SupabaseRuntime.pulling = true;
     try {
       const c = getSupabaseConfig();
+      let changed = false;
+      // 🔥 全局清空标记检测：云端若存在一次比本地更新的「清空全部数据」标记，
+      // 则强制清空本地业务数据（所有设备打开即自动清空，杜绝旧数据复活）
+      try {
+        const metaRes = await client.from(c.table)
+          .select('data_key,data')
+          .eq('workspace_id', c.workspaceId)
+          .eq('data_key', 'syncMeta')
+          .limit(1);
+        const metaRow = (metaRes && metaRes.data && metaRes.data[0]) || null;
+        if (metaRow) {
+          const raw = metaRow.data;
+          const meta = (typeof raw === 'string') ? JSON.parse(raw) : (raw || {});
+          const clearAt = Number(meta && meta.clearAt) || 0;
+          let seen = 0;
+          try { seen = Number(localStorage.getItem('lhn_clear_seen') || 0); } catch(e){}
+          if (clearAt > seen) {
+            // 云端标记比本地新 → 强制清空本地业务数据
+            CLEAR_DATA_KEYS.forEach(k => {
+              try { localStorage.removeItem('lhn_' + k); } catch(e){}
+              try { localStorage.removeItem(k); } catch(e){}
+              if (Array.isArray(State[k])) State[k] = [];
+            });
+            try { localStorage.setItem('lhn_clear_seen', String(clearAt)); } catch(e){}
+            // 回写云端空数据，确保闭环
+            try { await this.pushAll(); } catch(e){}
+            changed = true;
+          }
+        }
+      } catch(e) {}
       const { data, error } = await client
         .from(c.table)
         .select('data_key,data,updated_at')
         .eq('workspace_id', c.workspaceId)
         .in('data_key', SYNC_STATE_KEYS);
       if (error) throw error;
-      let changed = false;
       let needCloudSync = false; // 合并结果与云端不一致（本地删除/新增）时回写云端，形成同步闭环
       (data || []).forEach(row => {
         const key = row.data_key;
@@ -9904,7 +9933,13 @@ async function _pushCloudClear() {
     const cfg = getSupabaseConfig();
     if (!cfg.enabled || !cfg.url || !cfg.anonKey) return false;
     const endpoint = cfg.url.replace(/\/+$/, '') + '/rest/v1/' + (cfg.table || 'lh_nail_sync');
-    const tasks = CLEAR_DATA_KEYS.map(k => {
+    const clearAt = Date.now();
+    const body = CLEAR_DATA_KEYS.map(k => ({
+      workspace_id: cfg.workspaceId, data_key: k, data: [], updated_at: new Date().toISOString()
+    }));
+    // 同时写入「全局清空标记」，其他设备打开时自动清空本地
+    body.push({ workspace_id: cfg.workspaceId, data_key: 'syncMeta', data: { clearAt }, updated_at: new Date().toISOString() });
+    const tasks = body.map(item => {
       return fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -9913,11 +9948,15 @@ async function _pushCloudClear() {
           'Content-Type': 'application/json',
           'Prefer': 'resolution=merge-duplicates'
         },
-        body: JSON.stringify([{ workspace_id: cfg.workspaceId, data_key: k, data: [], updated_at: new Date().toISOString() }])
-      }).then(r => ({ k, ok: r.ok })).catch(() => ({ k, ok: false }));
+        body: JSON.stringify([item])
+      }).then(r => ({ ok: r.ok })).catch(() => ({ ok: false }));
     });
     const results = await Promise.all(tasks);
-    return results.every(r => r.ok);
+    const ok = results.every(r => r.ok);
+    if (ok) {
+      try { localStorage.setItem('lhn_clear_seen', String(clearAt)); } catch(e){}
+    }
+    return ok;
   } catch(e) { return false; }
 }
 
