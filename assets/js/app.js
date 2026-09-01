@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.86',
+  appVersion: '1.0.87',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -9875,19 +9875,19 @@ function importAllData(ev) {
   };
   fr.readAsText(f, 'utf-8');
 }
+// 清空业务数据使用的 key（保留 账号 users / 定价 prices / 配色 calColors,colorTypes / 设置 settings）
+const CLEAR_DATA_KEYS = ['appointments','customers','memberTxns','members','manualIncomes','expenses','auditLogs','images'];
 function clearAllData() {
   if (!hasPerm('*')) return alert('仅老板可以清空数据');
-  if (!confirm('⚠️⚠️⚠️ 即将清空【全部数据】\n\n包括：所有预约、顾客、会员、收支记录、定价配置、账号密码\n\n此操作不可逆！是否继续？')) return;
-  if (!confirm('二次确认：真的要清空全部数据吗？\n\n建议先点「导出全部数据」做备份！')) return;
-  BACKUP_KEYS.forEach(k => {
+  if (!confirm('⚠️⚠️⚠️ 即将清空【所有业务数据】\n\n包括：所有预约、顾客、会员、充值扣卡记录、手动收入、支出、审计日志、预约参考图\n\n账号、定价、日程配色、店铺设置会保留。\n\n此操作不可逆！是否继续？')) return;
+  if (!confirm('二次确认：真的要清空所有业务数据吗？\n\n建议先点「导出全部数据」做备份！')) return;
+  CLEAR_DATA_KEYS.forEach(k => {
     try { localStorage.removeItem(k); } catch(e){}
     State[k] = null;
   });
-  try { localStorage.removeItem('lh_session'); } catch(e){}
-  State.currentUser = null;
   // 🔥 同步清空云端业务数据（权威覆盖，防止旧数据从云端再次拉回复活）
   _pushCloudClear();
-  alert('✅ 已清空全部数据，页面将重新加载，请重新初始化老板账号');
+  alert('✅ 已清空所有业务数据（账号与配置保留），页面将重新加载');
   location.reload();
 }
 
@@ -9896,9 +9896,8 @@ async function _pushCloudClear() {
   try {
     const cfg = getSupabaseConfig();
     if (!cfg.enabled || !cfg.url || !cfg.anonKey) return;
-    const CLEAR_KEYS = ['appointments','customers','memberTxns','members','manualIncomes','expenses','auditLogs','users','images'];
     const endpoint = cfg.url.replace(/\/+$/, '') + '/rest/v1/' + (cfg.table || 'lh_nail_sync');
-    for (const k of CLEAR_KEYS) {
+    for (const k of CLEAR_DATA_KEYS) {
       try {
         await fetch(endpoint, {
           method: 'POST',
