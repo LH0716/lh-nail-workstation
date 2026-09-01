@@ -5065,7 +5065,7 @@ function openCompletePayModal(id) {
   // 会员办理区块：仅非会员可选（预约结算时同步开通年卡/储值会员）
   const joinBox = document.getElementById('cpJoinRow');
   if (joinBox) {
-    const canJoin = !!c && (!c.level || c.level === '');
+    const canJoin = !!c; // 所有顾客结算时均可办理/充值/升级会员
     joinBox.style.display = canJoin ? '' : 'none';
     document.querySelectorAll('input[name="cpJoin"]').forEach(r => r.checked = r.value === '');
     const ja = document.getElementById('cpJoinAmountRow'); if (ja) ja.style.display = 'none';
@@ -5112,22 +5112,43 @@ function onCompletePayJoinChange() {
   const id = window._completePayApptId;
   const a = appointmentById(id);
   if (!a) return;
+  const c = _findCustomerForAppt(a);
+  const cur = (c && c.level) ? normalizeMemberLevel(c.level) : '';
   const join = document.querySelector('input[name="cpJoin"]:checked')?.value || '';
   const amtWrap = document.getElementById('cpJoinAmountRow');
   if (amtWrap) amtWrap.style.display = (join === 'platinum' || join === 'diamond') ? '' : 'none';
+  const rank = { '': 0, 'gold': 1, 'platinum': 2, 'diamond': 3 };
   const original = Math.round((Number(a.originalTotal || a.finalTotal) || 0) * 100) / 100;
   let rate = 1;
   let joinLabel = '';
-  if (join === 'gold') { rate = 0.90; joinLabel = '🥇 黄金会员 · 首消9折'; }
-  else if (join === 'platinum') { rate = 0.90; joinLabel = '🥈 铂金会员 · 9折'; }
-  else if (join === 'diamond') { rate = 0.85; joinLabel = '🥉 钻石会员 · 85折'; }
+  if (join && rank[join] < rank[cur]) {
+    // 不允许选比当前更低的等级
+    toast(`已是${memberLabel(cur).label}，无需办理更低级别`, 'error');
+    const none = document.querySelector('input[name="cpJoin"][value=""]');
+    if (none) none.checked = true;
+    if (amtWrap) amtWrap.style.display = 'none';
+    if (cur === 'gold') rate = _getGoldDiscountRate(c.id);
+    else if (cur === 'platinum' || cur === 'diamond') rate = getMemberDiscount(cur).discount;
+  } else if (join === 'gold') {
+    rate = 0.90;
+    joinLabel = cur === 'gold' ? '🥇 黄金年卡 · 续费（9折）' : '🥇 黄金会员 · 首消9折';
+  } else if (join === 'platinum') {
+    rate = 0.90;
+    joinLabel = cur === 'platinum' ? '🥈 铂金会员 · 补储值（9折）' : (cur === 'gold' ? '🥈 铂金会员 · 升级（9折）' : '🥈 铂金会员 · 9折');
+  } else if (join === 'diamond') {
+    rate = 0.85;
+    joinLabel = cur === 'diamond' ? '🥉 钻石会员 · 补储值（85折）' : '🥉 钻石会员 · 85折';
+  } else if (!join && cur) {
+    // 已有会员选"不办理"：维持会员折扣
+    if (cur === 'gold') rate = _getGoldDiscountRate(c.id);
+    else if (cur === 'platinum' || cur === 'diamond') rate = getMemberDiscount(cur).discount;
+  }
   const amount = Math.round(original * rate * 100) / 100;
   const recEl = document.getElementById('cp_receivable');
   const amtEl = document.getElementById('cp_amount');
   if (recEl) recEl.value = fmtMoney(amount);
   if (amtEl) amtEl.value = amount.toFixed(2);
   const info = document.getElementById('cp_apptInfo');
-  const c = _findCustomerForAppt(a);
   if (info && c) {
     const mem = memberLabel(c?.level || a.member || '');
     info.innerHTML = `<strong>${escapeHtml(a.customer || '未命名顾客')}</strong><span>${escapeHtml(apptTypeLabel(a))} · ${fmtMoney(amount)}${joinLabel ? ' · ' + joinLabel : (mem.tag ? ' · ' + mem.tag + mem.label : '')}</span>`;
@@ -5142,29 +5163,52 @@ function confirmCompletePayment() {
   if (amount < 0) { toast('实收金额不能为负数', 'error'); return; }
   const method = document.getElementById('cp_payMethod')?.value || 'wechat';
   const c = _findCustomerForAppt(a);
-  // ---- 预约结算同步办理会员（仅非会员可选，办理后享受对应折扣）----
+  // ---- 预约结算同步办理/续费/补储值/升级会员（所有顾客可选，办理后享受对应折扣）----
   const join = document.querySelector('input[name="cpJoin"]:checked')?.value || '';
   if (join) {
-    if (join === 'gold' && (method === 'balance' || method === 'mixed')) { toast('黄金年卡无储值余额，请选择普通支付方式（微信/支付宝/现金/银行卡）', 'error'); return; }
     if (!c) { toast('未找到顾客档案，无法办理会员', 'error'); return; }
     const prevLevel = c.level || '', prevBalance = Number(c.balance) || 0, prevExpire = c.expire || '', prevGoldSince = c.goldSince || '';
+    const rank = { '': 0, 'gold': 1, 'platinum': 2, 'diamond': 3 };
+    if (rank[join] < rank[prevLevel]) { toast('已是更高等级会员，无需办理更低级别', 'error'); return; }
     let fee = 0, subtype = '';
     if (join === 'gold') {
+      if (method === 'balance' || method === 'mixed') { toast('黄金年卡无储值余额，请选择普通支付方式（微信/支付宝/现金/银行卡）', 'error'); return; }
       fee = 68;
-      c.level = 'gold'; c.balance = 0;
-      if (!c.goldSince) c.goldSince = todayDateStr();
-      const exp = new Date(); exp.setFullYear(exp.getFullYear() + 1);
-      c.expire = localDateStr(exp);
-      subtype = '年卡开通（预约结算）';
+      if (prevLevel === 'gold') {
+        // 续年卡：到期日或今天起再延一年
+        let base = new Date();
+        if (c.expire) { const ex = new Date(c.expire); if (!isNaN(ex.getTime()) && ex > base) base = ex; }
+        base.setFullYear(base.getFullYear() + 1);
+        c.expire = localDateStr(base);
+        subtype = '黄金年卡续费（预约结算）';
+      } else {
+        c.level = 'gold'; c.balance = 0;
+        if (!c.goldSince) c.goldSince = todayDateStr();
+        const exp = new Date(); exp.setFullYear(exp.getFullYear() + 1);
+        c.expire = localDateStr(exp);
+        subtype = '年卡开通（预约结算）';
+      }
     } else {
       const joinAmt = Math.round((Number(document.getElementById('cpJoinAmount')?.value) || 0) * 100) / 100;
       const min = join === 'platinum' ? 1000 : 2000;
-      if (!joinAmt || joinAmt < min) { toast(`${join === 'platinum' ? '铂金' : '钻石'}会员需储值 ${fmtMoney(min)} 起充`, 'error'); return; }
+      if (prevLevel === join) {
+        // 补储值：任意金额（≥1 元）
+        if (!joinAmt || joinAmt < 1) { toast('请填写本次补储值金额（≥1 元）', 'error'); return; }
+      } else {
+        // 开通或升级：按起充标准
+        if (!joinAmt || joinAmt < min) { toast(`${join === 'platinum' ? '铂金' : '钻石'}会员需储值 ${fmtMoney(min)} 起充`, 'error'); return; }
+      }
       fee = joinAmt;
-      c.level = join;
       c.balance = Math.round((prevBalance + joinAmt) * 100) / 100;
-      c.expire = '';
-      subtype = join === 'platinum' ? '铂金会员开通（预约结算）' : '钻石会员开通（预约结算）';
+      if (prevLevel === join) {
+        subtype = join === 'platinum' ? '铂金会员补储值（预约结算）' : '钻石会员补储值（预约结算）';
+      } else {
+        c.level = join;
+        c.expire = '';
+        subtype = prevLevel
+          ? (join === 'platinum' ? '铂金会员升级（预约结算）' : '钻石会员升级（预约结算）')
+          : (join === 'platinum' ? '铂金会员开通（预约结算）' : '钻石会员开通（预约结算）');
+      }
     }
     const joinTxId = genId('T');
     State.memberTxns.unshift({
