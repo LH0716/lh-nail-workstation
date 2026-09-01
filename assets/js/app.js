@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.83',
+  appVersion: '1.0.84',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -610,6 +610,7 @@ window.SupabaseSync = {
         .in('data_key', SYNC_STATE_KEYS);
       if (error) throw error;
       let changed = false;
+      let needCloudSync = false; // 合并结果与云端不一致（本地删除/新增）时回写云端，形成同步闭环
       (data || []).forEach(row => {
         const key = row.data_key;
         if (!SYNC_STATE_KEYS.includes(key)) return;
@@ -622,6 +623,11 @@ window.SupabaseSync = {
         if (JSON.stringify(merged) !== JSON.stringify(localVal)) {
           _setStateBlock(key, merged);
           changed = true;
+        }
+        // 只要合并结果与云端不一致（例如本地手动删除了一条云端仍活跃的记录、或本地新增了记录），
+        // 就标记需要回写云端，避免“删除被旧设备/旧云端数据复活”的问题。
+        if (JSON.stringify(merged) !== JSON.stringify(row.data)) {
+          needCloudSync = true;
         }
       });
       try {
@@ -638,6 +644,10 @@ window.SupabaseSync = {
         localStorage.setItem('lhn_lh_sync_ts', String(SupabaseRuntime.lastPullAt));
         localStorage.setItem('lh_sync_ts', String(SupabaseRuntime.lastPullAt));
       } catch(e) {}
+      // 合并结果与云端不一致时回写云端，确保删除/新增在云端闭环
+      if (needCloudSync) {
+        try { await this.pushAll(); } catch(e) {}
+      }
       if (changed && !(options && options.noRefresh)) refreshAllAfterSync();
       return changed;
     } catch(e) {
@@ -5062,10 +5072,10 @@ function openCompletePayModal(id) {
   document.getElementById('cp_extraPayMethod').value = 'wechat';
   document.getElementById('cp_remark').value = linkedDeduct ? `已关联历史扣卡 ${linkedDeduct.id}` : '';
   onCompletePayMethodChange();
-  // 会员办理区块：仅非会员可选（预约结算时同步开通年卡/储值会员）
+  // 会员办理区块：对所有预约结算显示（即使顾客档案暂缺也可现场办理并自动建档）
   const joinBox = document.getElementById('cpJoinRow');
   if (joinBox) {
-    const canJoin = !!c; // 所有顾客结算时均可办理/充值/升级会员
+    const canJoin = !!a; // 有预约即显示办理/充值/升级会员模块
     joinBox.style.display = canJoin ? '' : 'none';
     document.querySelectorAll('input[name="cpJoin"]').forEach(r => r.checked = r.value === '');
     const ja = document.getElementById('cpJoinAmountRow'); if (ja) ja.style.display = 'none';
@@ -5162,10 +5172,15 @@ function confirmCompletePayment() {
   let amount = Math.round((Number(document.getElementById('cp_amount')?.value) || 0) * 100) / 100;
   if (amount < 0) { toast('实收金额不能为负数', 'error'); return; }
   const method = document.getElementById('cp_payMethod')?.value || 'wechat';
-  const c = _findCustomerForAppt(a);
+  let c = _findCustomerForAppt(a);
   // ---- 预约结算同步办理/续费/补储值/升级会员（所有顾客可选，办理后享受对应折扣）----
   const join = document.querySelector('input[name="cpJoin"]:checked')?.value || '';
   if (join) {
+    // 顾客档案缺失时，先用预约信息自动补建档案（再办理会员）
+    if (!c && (a.customer || a.phone)) {
+      try { _syncCustomerAfterApptDone(a); } catch(e) {}
+      c = _findCustomerForAppt(a);
+    }
     if (!c) { toast('未找到顾客档案，无法办理会员', 'error'); return; }
     const prevLevel = c.level || '', prevBalance = Number(c.balance) || 0, prevExpire = c.expire || '', prevGoldSince = c.goldSince || '';
     const rank = { '': 0, 'gold': 1, 'platinum': 2, 'diamond': 3 };
