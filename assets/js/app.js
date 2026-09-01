@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.85',
+  appVersion: '1.0.86',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -9885,8 +9885,34 @@ function clearAllData() {
   });
   try { localStorage.removeItem('lh_session'); } catch(e){}
   State.currentUser = null;
+  // 🔥 同步清空云端业务数据（权威覆盖，防止旧数据从云端再次拉回复活）
+  _pushCloudClear();
   alert('✅ 已清空全部数据，页面将重新加载，请重新初始化老板账号');
   location.reload();
+}
+
+// 直接写空数组到 Supabase（绕过 pushKey 的空数组合并保护，权威覆盖云端）
+async function _pushCloudClear() {
+  try {
+    const cfg = getSupabaseConfig();
+    if (!cfg.enabled || !cfg.url || !cfg.anonKey) return;
+    const CLEAR_KEYS = ['appointments','customers','memberTxns','members','manualIncomes','expenses','auditLogs','users','images'];
+    const endpoint = cfg.url.replace(/\/+$/, '') + '/rest/v1/' + (cfg.table || 'lh_nail_sync');
+    for (const k of CLEAR_KEYS) {
+      try {
+        await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'apikey': cfg.anonKey,
+            'Authorization': 'Bearer ' + cfg.anonKey,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify([{ workspace_id: cfg.workspaceId, data_key: k, data: [], updated_at: new Date().toISOString() }])
+        });
+      } catch(e) {}
+    }
+  } catch(e) {}
 }
 
 /* ============================================================
