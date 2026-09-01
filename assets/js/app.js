@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.84',
+  appVersion: '1.0.85',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -2845,6 +2845,7 @@ function _findSameDayDeductOptionsForAppt(a, c, includeTxnId, targetAmount) {
     if (!t || t.type !== 'deduct') return false;
     if (typeof _isDeletedMemberTxn === 'function' && _isDeletedMemberTxn(t)) return false;
     if (t._auditOnly || t._hiddenFromDeductArchive) return false;
+    if (t._reversed) return false;
     if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return false;
     if (t._reverseOf) return false;
     if ((t.date || '').slice(0, 10) !== day) return false;
@@ -3146,6 +3147,7 @@ function renderOverviewStats() {
   });
   activeRows(State.memberTxns).forEach(t => {
     if (t._auditOnly) return;
+    if (t._reversed) return;
     if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return;
     if (t.type !== 'deduct') return;
     if (!_ovDateInRange(t.date, range)) return;
@@ -3205,6 +3207,7 @@ function renderOverviewStats() {
   });
   activeRows(State.memberTxns).forEach(t => {
     if (t._auditOnly) return;
+    if (t._reversed) return;
     if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return;
     if (t.type !== 'deduct') return;
     if (!prevF(t.date)) return;
@@ -5022,6 +5025,7 @@ function _findSameDayUnlinkedDeductForAppt(a, c, targetAmount) {
     if (!t || t.type !== 'deduct') return false;
     if (typeof _isDeletedMemberTxn === 'function' && _isDeletedMemberTxn(t)) return false;
     if (t._auditOnly || t._hiddenFromDeductArchive) return false;
+    if (t._reversed) return false;
     if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return false;
     if (t.apptId || t._reverseOf) return false;
     if ((t.date || '').slice(0, 10) !== day) return false;
@@ -5322,12 +5326,39 @@ function confirmCompletePayment() {
   a.completedPayAt = new Date().toISOString();
   a.payRemark = document.getElementById('cp_remark')?.value.trim() || '';
   changeApptStatus(id, 'done');
+  if (c) { try { _recalcMemberBalance(c.id); } catch(e) {} }
   save('memberTxns', State.memberTxns);
   addAuditLog('完成收款', `${a.customer || '顾客'} · ${apptTypeLabel(a)} · ${fmtMoney(amount)} · ${payLabel}`, a.id, { amount, payMethod: payLabel, deductAmt, extraAmt });
   closeCompletePayModal();
   openPaymentReceiptModal(id);
   toast('已完成收款并入账', 'success');
 }
+/* ============================================================
+   余额统一重算：余额 = 该会员所有「有效交易流水」之和（实时计算）
+   - recharge（充值/储值/年卡/办理）→ +金额
+   - deduct（扣卡消费）→ -金额
+   - 排除：冲正/撤销/退会/审计类记录（它们只用于审计，不代表真实入金/出金）
+   - 黄金年卡会员无储值余额，恒为 0
+   任何充值/扣卡/删除/冲正/撤销/编辑后调用，确保余额永远与流水一致。
+   ============================================================ */
+function _recalcMemberBalance(cid) {
+  const c = customerById(cid);
+  if (!c) return;
+  if (c.level === 'gold') { c.balance = 0; return; }
+  let bal = 0;
+  activeRows(State.memberTxns).forEach(t => {
+    if (!t || t.cid !== cid) return;
+    if (t._auditOnly || t._hiddenFromDeductArchive) return;
+    if (t._reversed || t._reverseOf) return;
+    const sub = t.subtype || '';
+    if (sub.includes('冲正') || sub.includes('撤销') || sub.includes('退会')) return;
+    const amt = Number(t.amount) || 0;
+    if (t.type === 'recharge') bal += amt;
+    else if (t.type === 'deduct') bal -= amt;
+  });
+  c.balance = Math.round(bal * 100) / 100;
+}
+
 function undoApptPayment(id) {
   const a = appointmentById(id);
   if (!a) { toast('预约不存在', 'error'); return; }
@@ -5391,7 +5422,6 @@ function undoApptPayment(id) {
     }
     if (jc) {
       jc.level = jm.prevLevel || '';
-      jc.balance = Math.round((Number(jm.prevBalance) || 0) * 100) / 100;
       jc.expire = jm.prevExpire || '';
       if (jc.level !== 'gold') jc.goldSince = jm.prevGoldSince || '';
     }
@@ -5412,6 +5442,10 @@ function undoApptPayment(id) {
   a.payRemark = '';
   a.doneAt = '';
   a._paymentVoidedAt = now.toISOString();
+
+  // 统一按有效流水重算余额，确保撤销后余额与扣卡/办理流水严格一致
+  if (c) { try { _recalcMemberBalance(c.id); } catch(e) {} }
+  else if (a.customerId) { try { _recalcMemberBalance(a.customerId); } catch(e) {} }
 
   try {
     window.__LH_SILENT_SAVE = true;
@@ -5701,6 +5735,7 @@ function _customerRangeStatsByPrefix(c, prefix) {
   let visits = 0, paid = 0;
   activeRows(State.memberTxns).forEach(t => {
     if (t._auditOnly) return;
+    if (t._reversed) return;
     if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return;
     if (t.cid !== c.id || t.type !== 'deduct') return;
     if (!String(t.date || '').startsWith(prefix)) return;
@@ -5870,6 +5905,7 @@ function renderCustomerTxns(cid) {
   // 3) 储值充值（非消费，单独标注）
   activeRows(State.memberTxns).forEach(t => {
     if (t.cid !== c.id || t.type !== 'recharge') return;
+    if (t._reversed) return; // 已冲正的充值不再计入累计充值
     if (Number(t.amount) <= 0) return;
     const day = String(t.date || '').slice(0, 10);
     rows.push({
@@ -6093,6 +6129,7 @@ function renderVisitRank() {
         // 从交易记录中统计该范围内扣款次数 + 金额
         activeRows(State.memberTxns).forEach(t => {
           if (t._auditOnly) return;
+          if (t._reversed) return;
           if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return;
           if (t.cid !== c.id || t.type !== 'deduct') return;
           if (new Date(t.date).getTime() < threshold) return;
@@ -6313,11 +6350,22 @@ function degradeMember(id) {
   } catch (e) {}
 
   // 清卡：等级/余额/有效期清空，其他字段全部保留
+  // 同时把该顾客所有未冲正的储值充值标记为已冲正，确保余额口径一致（历史充值仍保留存档）
+  if (bal > 0) {
+    try {
+      State.memberTxns.forEach(t => {
+        if (t && t.cid === c.id && t.type === 'recharge' && !t._reversed && !_isDeletedMemberTxn(t) && !t._auditOnly) {
+          t._reversed = true;
+        }
+      });
+    } catch(e) {}
+  }
   c.level = '';
   c.balance = 0;
   c.expire = '';
   c.goldSince = '';
   save('customers', State.customers);
+  save('memberTxns', State.memberTxns);
   refreshAllCustomerViews();
   toast(`已清卡退会员：${c.name} 降级为普通顾客，消费数据全部保留 ✅`, 'success');
 }
@@ -6509,6 +6557,7 @@ function renderMemberTxnList() {
     if (typeof _isDeletedMemberTxn === 'function' && _isDeletedMemberTxn(t)) return false;
     if (t.id && deletedIds.has(t.id)) return false;
     if (t._auditOnly || t._hiddenFromDeductArchive) return false;
+    if (t._reversed) return false;
     if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return false;
     return true;
   });
@@ -6564,6 +6613,7 @@ function _activeRechargeTxns() {
     if (!t || t.type !== 'recharge') return false;
     if (typeof _isDeletedMemberTxn === 'function' && _isDeletedMemberTxn(t)) return false;
     if (t._auditOnly || t._hiddenFromDeductArchive) return false;
+    if (t._reversed) return false;
     if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return false;
     return true;
   });
@@ -6659,8 +6709,9 @@ function editRechargeRecord(txnId) {
   tx.payMethod = newPay || tx.payMethod;
   tx.remark = newRemark;
   tx.balanceAfter = c.level === 'gold' ? 0 : Math.round(((Number(c.balance)||0) + diff) * 100) / 100;
-  if (c.level !== 'gold') c.balance = tx.balanceAfter;
   touchRecord(tx); touchRecord(c);
+  if (c.level !== 'gold') { try { _recalcMemberBalance(c.id); } catch(e) {} }
+  tx.balanceAfter = c.level === 'gold' ? 0 : Number(c.balance) || 0;
   save('customers', State.customers);
   save('memberTxns', State.memberTxns);
   addAuditLog('充值记录编辑', `${c.name || '会员'} · ${fmtMoney(oldAmount)} → ${fmtMoney(newAmount)}`, txnId, { oldAmount, newAmount, diff });
@@ -6676,15 +6727,14 @@ function deleteRechargeRecord(txnId) {
   const c = customerById(tx.cid || tx.customerId);
   const amt = Number(tx.amount) || 0;
   const special = /年卡|升级|退会|冲正|退款/.test(tx.subtype || '');
-  const msg = `确认删除这笔会员充值记录？\n\n会员：${c?.name || '未知会员'}\n类型：${tx.subtype || '会员充值'}\n金额：${fmtMoney(amt)}\n\n删除后记录不会再显示，也不会计入收入。${c && c.level !== 'gold' ? `\n系统会从该会员余额中扣回 ${fmtMoney(amt)}。` : ''}${special ? '\n\n提示：这是年卡/升级/退会/冲正类记录，如需恢复会员等级，请到会员档案里手动调整。' : ''}`;
+  const msg = `确认删除这笔会员充值记录？\n\n会员：${c?.name || '未知会员'}\n类型：${tx.subtype || '会员充值'}\n金额：${fmtMoney(amt)}\n\n删除后记录不会再显示，也不会计入收入，并从会员余额中扣回 ${fmtMoney(amt)}。${special ? '\n\n提示：这是年卡/升级/退会/冲正类记录，如需恢复会员等级，请到会员档案里手动调整。' : ''}`;
   if (!confirm(msg)) return;
   if (c && c.level !== 'gold') {
     const nextBal = Math.round(((Number(c.balance)||0) - amt) * 100) / 100;
-    if (nextBal < -0.001 && !confirm(`删除后会员余额会变成 ${fmtMoney(nextBal)}，确认继续？`)) return;
-    c.balance = nextBal;
-    touchRecord(c);
+    if (nextBal < -0.001 && !confirm(`⚠️ 删除后会员余额会变成 ${fmtMoney(nextBal)}（负数）。\n\n这说明这笔充值中已有 ${fmtMoney(Math.abs(nextBal))} 被消费抵扣过了。\n· 若这笔充值确属误录，可继续删除；\n· 若顾客已实际消费该金额，建议改用「收入明细 → 该充值 → 冲正退款」处理，账目更清晰。\n\n确认继续删除？`)) return;
   }
   softDeleteRecord(tx, '删除会员充值记录');
+  if (c) { try { _recalcMemberBalance(c.id); } catch(e) {} }
   save('customers', State.customers);
   save('memberTxns', State.memberTxns);
   addAuditLog('充值记录删除', `${c?.name || '会员'} · ${tx.subtype || ''} · ${fmtMoney(amt)}`, txnId, { amount: amt });
@@ -6913,6 +6963,8 @@ function confirmRecharge() {
     beforeState,
     afterState: { level: c.level || '', balance: Number(c.balance) || 0, expire: c.expire || '' }
   });
+  // 统一按有效流水重算余额，确保充值/年卡/升级后余额与流水一致（gold 恒0）
+  try { _recalcMemberBalance(cid); } catch(e) {}
   save('customers', State.customers);
   save('memberTxns', State.memberTxns);
   addAuditLog('会员充值', `${c.name || '会员'} · ${subtype} · ${fmtMoney(amount)} · 余额 ${fmtMoney(newBalance)}`, cid, { amount, subtype, payMethod });
@@ -7139,6 +7191,8 @@ function confirmDeduct() {
     balanceAfter: newBalance,
     apptId: apptId || ''
   });
+  // 统一按有效流水重算余额，确保扣卡后余额与流水一致
+  try { _recalcMemberBalance(cid); } catch(e) {}
 
   // ⚠️「已完成」已移除：关联预约更新为已确认 + 实付金额 + 反向写入扣卡ID
   if (apptId) {
@@ -7201,6 +7255,7 @@ function _shouldShowDeductArchiveTxn(t, deletedIds) {
   if (_isDeletedMemberTxn(t)) return false;
   if (t.id && deletedIds && deletedIds.has(t.id)) return false;
   if (t._hiddenFromDeductArchive || t._auditOnly) return false;
+  if (t._reversed) return false;
   if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return false;
   return true;
 }
@@ -7879,10 +7934,10 @@ function deleteDeductRecord(txnId) {
     _hiddenFromDeductArchive: true
   });
 
-  // 3. 退回会员余额 & 累计消费回退
+  // 3. 退回会员余额 & 累计消费回退（余额统一按有效流水重算，避免与流水不一致）
   if (c) {
-    if (c.level !== 'gold') c.balance = (c.balance || 0) + origAmount;
     c.totalPaid = Math.max(0, (c.totalPaid || 0) - origAmount);
+    try { _recalcMemberBalance(c.id); } catch(e) {}
   }
 
   // 4. 取消关联预约
@@ -8085,6 +8140,7 @@ function buildIncomeRecords() {
   activeRows(State.memberTxns).forEach(tx => {
     if (tx._deleted) return;
     if (tx._auditOnly) return;
+    if (tx._reversed) return; // 已冲正的充值/扣卡不再计入收入
     if ((tx.subtype || '').includes('冲正') || (tx.subtype || '').includes('撤销')) return;
     const txCustomerId = tx.customerId || tx.cid || '';
     if (tx.type === 'deduct') {
@@ -8448,10 +8504,14 @@ function deleteIncome(id) {
     const amt = Number(tx.amount) || 0;
     if (tx.type === 'recharge') {
       let msg = c ? `这笔「${c.name}」的充值记录：\n  · 充值本金：${fmtMoney(amt)}\n  · 支付方式：${tx.payMethod||'微信'}\n\n` : `这笔充值记录：\n  · 充值本金：${fmtMoney(amt)}\n\n`;
-      msg += `取消后会生成一条【冲正充值退款】记录：\n  · 会员余额扣除 ${fmtMoney(amt)}\n  · 总收入自动减去 ${fmtMoney(amt)}\n  · 原充值记录保留（作为存档）\n\n确认执行退款冲正？（注意：如果之前已经把钱线下退给顾客了，再点确认，避免重复退款）`;
+      msg += `取消后会生成一条【冲正充值退款】记录：\n  · 会员余额扣除 ${fmtMoney(amt)}\n  · 总收入自动减去 ${fmtMoney(amt)}\n  · 原充值记录保留（作为存档，不再计入统计）\n\n确认执行退款冲正？（注意：如果之前已经把钱线下退给顾客了，再点确认，避免重复退款）`;
       if (!confirm(msg)) return;
+      const newTxId = genId('TX');
+      // 原充值标记为已冲正（保留存档，但不再计入余额/收入/累计充值）
+      tx._reversed = true;
+      tx._reverseOf = newTxId;
       const newTx = {
-        id: genId('TX'),
+        id: newTxId,
         cid: txCustomerId,
         type: 'recharge',
         subtype: '【冲正】充值退款（取消收入明细）',
@@ -8462,22 +8522,25 @@ function deleteIncome(id) {
         time: new Date().toTimeString().slice(0,5),
         items: [{ name: '收入明细删除冲正：' + (tx.subtype||'会员充值'), qty: 1, price: -amt }],
         _auditOnly: true,
-        _hiddenFromDeductArchive: true
+        _hiddenFromDeductArchive: true,
+        _reverseOf: newTxId
       };
       State.memberTxns.push(newTx);
-      // 扣回余额
-      if (c && c.level && c.level !== 'gold') {
-        c.balance = Math.max(0, Number(c.balance||0) - amt);
-        save('customers', State.customers);
-      }
+      // 统一按有效流水重算余额（原记录已 _reversed，余额自动扣除冲正金额）
+      if (c) { try { _recalcMemberBalance(c.id); } catch(e) {} }
+      save('customers', State.customers);
       save('memberTxns', State.memberTxns);
       toast(`已冲正退款：${fmtMoney(amt)} 已从会员余额中扣回 ✅`, 'success');
     } else if (tx.type === 'deduct') {
       let msg = c ? `这笔「${c.name}」的扣卡消费记录：\n  · 扣卡金额：${fmtMoney(amt)}\n  · 项目：${tx.items && tx.items.length ? tx.items.map(i=>i.name).join('、') : '会员服务'}\n\n` : `这笔扣卡消费记录：\n  · 扣卡金额：${fmtMoney(amt)}\n\n`;
-      msg += `取消后会生成一条【撤销扣卡】记录：\n  · 会员余额退回 ${fmtMoney(amt)}\n  · 总收入自动减去 ${fmtMoney(amt)}\n  · 原扣卡记录保留（作为存档）\n\n确认执行撤销？`;
+      msg += `取消后会生成一条【撤销扣卡】记录：\n  · 会员余额退回 ${fmtMoney(amt)}\n  · 总收入自动减去 ${fmtMoney(amt)}\n  · 原扣卡记录保留（作为存档，不再计入统计）\n\n确认执行撤销？`;
       if (!confirm(msg)) return;
+      const newTxId = genId('TX');
+      // 原扣卡标记为已冲正（保留存档，但不再计入余额/收入）
+      tx._reversed = true;
+      tx._reverseOf = newTxId;
       const newTx = {
-        id: genId('TX'),
+        id: newTxId,
         cid: txCustomerId,
         type: 'deduct',
         subtype: '【冲正】撤销扣卡（取消收入明细）',
@@ -8487,14 +8550,13 @@ function deleteIncome(id) {
         time: new Date().toTimeString().slice(0,5),
         items: [{ name: '收入明细删除冲正：撤销扣卡项目（' + (tx.items && tx.items.length ? tx.items.map(i=>i.name).join('、') : '服务') + '）', qty: 1, price: -amt }],
         _auditOnly: true,
-        _hiddenFromDeductArchive: true
+        _hiddenFromDeductArchive: true,
+        _reverseOf: newTxId
       };
       State.memberTxns.push(newTx);
-      // 加回余额（黄金会员不处理余额）
-      if (c && c.level && c.level !== 'gold') {
-        c.balance = Number(c.balance||0) + amt;
-        save('customers', State.customers);
-      }
+      // 统一按有效流水重算余额（原记录已 _reversed，余额自动退回扣卡金额）
+      if (c) { try { _recalcMemberBalance(c.id); } catch(e) {} }
+      save('customers', State.customers);
       save('memberTxns', State.memberTxns);
       toast(`已撤销扣卡：${fmtMoney(amt)} 已退回会员余额 ✅`, 'success');
     } else {
@@ -10584,6 +10646,7 @@ function renderMonthlyReport() {
   const customers = new Set(ords.map(a => a.customerId || ('n::'+(a.customer||'未命名')))).size;
   const deductCount = activeRows(State.memberTxns).filter(t => {
     if (t._auditOnly) return false;
+    if (t._reversed) return false;
     if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return false;
     return t.type === 'deduct' && inRange(new Date(t.date).getTime());
   }).length;

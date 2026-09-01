@@ -5,17 +5,17 @@
    2) 页面优先取缓存 + 后台更新（Stale-While-Revalidate）
    3) 缓存命中后不阻塞主进程，保证手机上秒开 App
    ============================================================ */
-const VERSION = 'lhnail-v1.0.84';
+const VERSION = 'lhnail-v1.0.85';
 const CACHE_NAME = 'lhnail-cache-' + VERSION;
 const APP_SHELL = [
   './',
   './index.html',
   './clear-cache.html',
   './manifest.json',
-  './assets/css/style.css?v=1.0.84',
-  './assets/js/supabase.min.js?v=1.0.84',
-  './assets/js/supabase-config.js?v=1.0.84',
-  './assets/js/app.js?v=1.0.84',
+  './assets/css/style.css?v=1.0.85',
+  './assets/js/supabase.min.js?v=1.0.85',
+  './assets/js/supabase-config.js?v=1.0.85',
+  './assets/js/app.js?v=1.0.85',
   './scan-this-on-phone.html',
   './app-install-guide.html',
   './assets/icons/icon-192.svg',
