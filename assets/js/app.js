@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.89',
+  appVersion: '1.0.90',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -620,15 +620,14 @@ window.SupabaseSync = {
           let seen = 0;
           try { seen = Number(localStorage.getItem('lhn_clear_seen') || 0); } catch(e){}
           if (clearAt > seen) {
-            // 云端标记比本地新 → 强制清空本地业务数据
+            // 云端标记比本地新 → 强制清空本地业务数据（只清本地，不推云端：
+            // 云端已由「清空全部数据」权威清空，这里若推空数组会在其他设备已录入新数据时误清云端）
             CLEAR_DATA_KEYS.forEach(k => {
               try { localStorage.removeItem('lhn_' + k); } catch(e){}
               try { localStorage.removeItem(k); } catch(e){}
               if (Array.isArray(State[k])) State[k] = [];
             });
             try { localStorage.setItem('lhn_clear_seen', String(clearAt)); } catch(e){}
-            // 回写云端空数据，确保闭环
-            try { await this.pushAll(); } catch(e){}
             changed = true;
           }
         }
