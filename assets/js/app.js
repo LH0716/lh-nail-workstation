@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.90',
+  appVersion: '1.0.91',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -156,6 +156,19 @@ function verifyLocalCollectionHas(key, id) {
   } catch(e) { return false; }
 }
 function save(key, val) {
+  // ⚠️ 强制云端清理模式：业务数据一律不保存（本地+云端），防止清理期间误录入后被云端覆盖丢失
+  if (['appointments','customers','memberTxns','manualIncomes','expenses','auditLogs','images'].includes(key)) {
+    try {
+      if (localStorage.getItem('lhn_force_cloud') === '1') {
+        if (!window.__LH_FC_TOAST) {
+          window.__LH_FC_TOAST = true;
+          setTimeout(() => { window.__LH_FC_TOAST = false; }, 4000);
+          try { if (typeof toast === 'function') toast('🔒 清理模式中：数据暂不保存。请到 设置 → 数据维护中心 点击「完成清理」恢复正常'); } catch(e){}
+        }
+        return false;
+      }
+    } catch(e) {}
+  }
   try { val = normalizeCoreCollection(key, val); } catch (e) {}
   let localOk = true;
   let raw = '';
@@ -186,8 +199,14 @@ function save(key, val) {
   // ⚠️ 安全保护：首次从云端拉取完成前不推送，防止新设备空数据覆盖云端
   try {
     if (window.SupabaseSync && window.SupabaseSync.pushKey) {
-      if (SupabaseRuntime.cloudPulledOnce || !isSupabaseReady()) {
-        window.SupabaseSync.pushKey(key, val);
+      // ⚠️ 强制云端清理模式期间，业务数据不推送到云端（防止旧设备旧数据推回污染）
+      let isForced = false;
+      try { isForced = localStorage.getItem('lhn_force_cloud') === '1'; } catch(e){}
+      const bizKey = ['appointments','customers','memberTxns','manualIncomes','expenses','auditLogs','images'].includes(key);
+      if (!(isForced && bizKey)) {
+        if (SupabaseRuntime.cloudPulledOnce || !isSupabaseReady()) {
+          window.SupabaseSync.pushKey(key, val);
+        }
       }
     }
   } catch (e) {}
@@ -604,8 +623,9 @@ window.SupabaseSync = {
     try {
       const c = getSupabaseConfig();
       let changed = false;
-      // 🔥 全局清空标记检测：云端若存在一次比本地更新的「清空全部数据」标记，
-      // 则强制清空本地业务数据（所有设备打开即自动清空，杜绝旧数据复活）
+      let forceCloudMode = false; // 强制云端单向模式：本地业务数据一律以云端为准，不推回
+      // 🔥 云端同步模式检测：mode=force_cloud 时进入「强制云端清理模式」（多设备彻底清空用）
+      //     mode=normal 时按 clearAt 自动清理本地（只清本地，不推云端）
       try {
         const metaRes = await client.from(c.table)
           .select('data_key,data')
@@ -616,19 +636,29 @@ window.SupabaseSync = {
         if (metaRow) {
           const raw = metaRow.data;
           const meta = (typeof raw === 'string') ? JSON.parse(raw) : (raw || {});
+          const mode = (meta && meta.mode) || 'normal';
           const clearAt = Number(meta && meta.clearAt) || 0;
           let seen = 0;
           try { seen = Number(localStorage.getItem('lhn_clear_seen') || 0); } catch(e){}
-          if (clearAt > seen) {
-            // 云端标记比本地新 → 强制清空本地业务数据（只清本地，不推云端：
-            // 云端已由「清空全部数据」权威清空，这里若推空数组会在其他设备已录入新数据时误清云端）
-            CLEAR_DATA_KEYS.forEach(k => {
-              try { localStorage.removeItem('lhn_' + k); } catch(e){}
-              try { localStorage.removeItem(k); } catch(e){}
-              if (Array.isArray(State[k])) State[k] = [];
-            });
-            try { localStorage.setItem('lhn_clear_seen', String(clearAt)); } catch(e){}
+          if (mode === 'force_cloud') {
+            // 强制云端单向：本机进入清理模式，业务数据随后一律以云端（空）覆盖，不推回旧数据
+            try { localStorage.setItem('lhn_force_cloud', '1'); } catch(e){}
+            try { localStorage.setItem('lhn_clear_seen', String(clearAt || Date.now())); } catch(e){}
+            forceCloudMode = true;
             changed = true;
+          } else {
+            try { localStorage.removeItem('lhn_force_cloud'); } catch(e){}
+            if (clearAt > seen) {
+              // 云端标记比本地新 → 强制清空本地业务数据（只清本地，不推云端：
+              // 云端已由「清空全部数据」权威清空，这里若推空数组会在其他设备已录入新数据时误清云端）
+              CLEAR_DATA_KEYS.forEach(k => {
+                try { localStorage.removeItem('lhn_' + k); } catch(e){}
+                try { localStorage.removeItem(k); } catch(e){}
+                if (Array.isArray(State[k])) State[k] = [];
+              });
+              try { localStorage.setItem('lhn_clear_seen', String(clearAt)); } catch(e){}
+              changed = true;
+            }
           }
         }
       } catch(e) {}
@@ -647,15 +677,24 @@ window.SupabaseSync = {
           const raw = localStorage.getItem('lhn_' + key);
           if (raw != null) localVal = JSON.parse(raw);
         } catch(e) {}
-        const merged = mergeSupabaseBlock(key, localVal, row.data);
+        let merged;
+        if (forceCloudMode && CLEAR_DATA_KEYS.includes(key)) {
+          // 强制云端模式：业务数据直接以云端为准（云端已清空 → 本地被覆盖为空），不合并、不推回
+          merged = row.data;
+        } else {
+          merged = mergeSupabaseBlock(key, localVal, row.data);
+        }
         if (JSON.stringify(merged) !== JSON.stringify(localVal)) {
           _setStateBlock(key, merged);
           changed = true;
         }
         // 只要合并结果与云端不一致（例如本地手动删除了一条云端仍活跃的记录、或本地新增了记录），
         // 就标记需要回写云端，避免“删除被旧设备/旧云端数据复活”的问题。
-        if (JSON.stringify(merged) !== JSON.stringify(row.data)) {
-          needCloudSync = true;
+        // ⚠️ 强制云端模式不回写（避免旧设备旧数据推回云端污染）
+        if (!(forceCloudMode && CLEAR_DATA_KEYS.includes(key))) {
+          if (JSON.stringify(merged) !== JSON.stringify(row.data)) {
+            needCloudSync = true;
+          }
         }
       });
       try {
@@ -9936,8 +9975,9 @@ async function _pushCloudClear() {
     const body = CLEAR_DATA_KEYS.map(k => ({
       workspace_id: cfg.workspaceId, data_key: k, data: [], updated_at: new Date().toISOString()
     }));
-    // 同时写入「全局清空标记」，其他设备打开时自动清空本地
-    body.push({ workspace_id: cfg.workspaceId, data_key: 'syncMeta', data: { clearAt }, updated_at: new Date().toISOString() });
+    // 同时写入「强制云端清理模式」标记（mode=force_cloud），
+    // 所有设备打开时本地一律以云端为准，彻底杜绝旧设备旧数据推回云端复活
+    body.push({ workspace_id: cfg.workspaceId, data_key: 'syncMeta', data: { mode: 'force_cloud', clearAt }, updated_at: new Date().toISOString() });
     const tasks = body.map(item => {
       return fetch(endpoint, {
         method: 'POST',
@@ -9957,6 +9997,33 @@ async function _pushCloudClear() {
     }
     return ok;
   } catch(e) { return false; }
+}
+
+// ✅ 完成强制清理模式：把云端 syncMeta 切回 normal，恢复正常双向同步
+async function finishForceCloud() {
+  if (!confirm('请先确认【所有设备】都已打开过工作台、并且都显示了「清理模式」提示（即本机旧数据已清空）。\n\n确认无误后点击确定，将恢复正常双向同步。之后录入的新数据会正常保存、不会丢失。')) return;
+  try {
+    const cfg = getSupabaseConfig();
+    if (!cfg.enabled || !cfg.url || !cfg.anonKey) return alert('云端未配置，无法完成');
+    const endpoint = cfg.url.replace(/\/+$/, '') + '/rest/v1/' + (cfg.table || 'lh_nail_sync');
+    const rsp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'apikey': cfg.anonKey,
+        'Authorization': 'Bearer ' + cfg.anonKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify([{ workspace_id: cfg.workspaceId, data_key: 'syncMeta', data: { mode: 'normal', clearAt: Date.now() }, updated_at: new Date().toISOString() }])
+    });
+    if (!rsp.ok) return alert('❌ 完成清理失败（' + rsp.status + '），请重试');
+    try { localStorage.removeItem('lhn_force_cloud'); } catch(e){}
+    try { localStorage.setItem('lhn_clear_seen', String(Date.now())); } catch(e){}
+    alert('✅ 已恢复正常同步。请在所有设备上重新打开工作台（会自动更新）。');
+    location.reload();
+  } catch(e) {
+    alert('❌ 完成清理失败：' + (e.message || String(e)));
+  }
 }
 
 /* ============================================================
@@ -10120,6 +10187,15 @@ function analyzeDataHealth() {
 }
 function renderDataMaintenance() {
   ensureAuditLogs();
+  // 🔒 强制云端清理模式：显示清理提示面板
+  try {
+    const fcp = document.getElementById('forceCloudPanel');
+    if (fcp) {
+      let forced = false;
+      try { forced = localStorage.getItem('lhn_force_cloud') === '1'; } catch(e){}
+      fcp.style.display = forced ? 'block' : 'none';
+    }
+  } catch(e) {}
   const lastBackup = State.settings?.lastBackupAt;
   const backupEl = document.getElementById('dmBackupStatus');
   const backupSub = document.getElementById('dmBackupSub');
