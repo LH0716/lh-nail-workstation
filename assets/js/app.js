@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.93',
+  appVersion: '1.0.94',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -8355,6 +8355,7 @@ function renderTodayBusinessSummary() {
 }
 
 function setIncomeTodayView() {
+  window._incCustomRange = null;
   const range = document.getElementById('incRange');
   const type = document.getElementById('incType');
   const search = document.getElementById('incSearch');
@@ -8368,7 +8369,24 @@ function setIncomeTodayView() {
 // -------- 收入：渲染 --------
 function renderIncome() {
   const rangeKey = document.getElementById('incRange')?.value || 'month';
-  const range = getRange(rangeKey);
+  const cr = window._incCustomRange;
+  let range;
+  if (cr && cr.month) {
+    const y = +cr.month.slice(0,4), m = +cr.month.slice(5,7);
+    range = [new Date(y, m-1, 1), new Date(y, m, 0, 23, 59, 59, 999)];
+  } else if (cr && cr.year) {
+    const y = +cr.year;
+    range = [new Date(y, 0, 1), new Date(y, 11, 31, 23, 59, 59, 999)];
+  } else {
+    range = getRange(rangeKey);
+  }
+  // 明细区标题显示当前查看范围（按月/按年统计点入时）
+  const rl = document.getElementById('incRangeLabel');
+  if (rl) {
+    rl.textContent = (cr && (cr.month || cr.year))
+      ? `当前查看：${cr.month ? cr.month.replace('-',' 年 ') + ' 月' : cr.year + ' 年'}`
+      : '';
+  }
   const q = (document.getElementById('incSearch')?.value || '').trim().toLowerCase();
   const fType = document.getElementById('incType')?.value || '';
   let all = buildIncomeRecords().filter(r => inRange(r.datetime, range));
@@ -8489,6 +8507,99 @@ function renderIncome() {
       }).join('');
     }
   }
+  try { renderIncomeMonthlyStats(); } catch(e) {}
+}
+
+// -------- 收入：按月 / 按年统计 --------
+function renderIncomeMonthlyStats() {
+  const all = buildIncomeRecords();
+  // ---- 按年汇总 ----
+  const yMap = {};
+  all.forEach(r => {
+    const y = (r.datetime || '').slice(0, 4);
+    if (!y) return;
+    if (!yMap[y]) yMap[y] = { total:0, biz:0, rech:0, man:0, cnt:0 };
+    const b = yMap[y];
+    b.total += (Number(r.amount) || 0);
+    if (r.bizRevenue) b.biz += (Number(r.amount) || 0);
+    if (r.recharge) b.rech += (Number(r.amount) || 0);
+    if (r.manual) b.man += (Number(r.amount) || 0);
+    b.cnt++;
+  });
+  const years = Object.keys(yMap).sort((a,b)=>b.localeCompare(a));
+  const yBody = document.getElementById('incYearStats');
+  if (yBody) {
+    yBody.innerHTML = years.length === 0
+      ? `<tr><td colspan="7" style="padding:28px 0;text-align:center;color:var(--muted);font-size:13px;">🍵 暂无收入数据</td></tr>`
+      : years.map(y => {
+          const b = yMap[y];
+          return `<tr>
+            <td style="font-weight:600;">${y} 年</td>
+            <td style="font-weight:700;color:var(--accent);">${fmtMoney(b.total)}</td>
+            <td>${fmtMoney(b.biz)}</td>
+            <td>${fmtMoney(b.rech)}</td>
+            <td>${fmtMoney(b.man)}</td>
+            <td>${b.cnt} 笔</td>
+            <td><button class="btn-ghost xsmall" onclick="viewIncomeYear('${y}')">📋 查看年明细</button></td>
+          </tr>`;
+        }).join('');
+  }
+  // ---- 年份选择器（默认当前年份，否则取最近有数据的年份） ----
+  const curY = String(new Date().getFullYear());
+  const sel = document.getElementById('incYearSelect');
+  let chosen = curY;
+  if (sel) {
+    const prev = sel.value;
+    sel.innerHTML = years.map(y => `<option value="${y}">${y} 年</option>`).join('');
+    chosen = years.includes(prev) ? prev : (years.includes(curY) ? curY : (years[0] || ''));
+    sel.value = chosen;
+  }
+  // ---- 按月明细 ----
+  const mBody = document.getElementById('incMonthStats');
+  if (mBody) {
+    const mMap = {};
+    all.filter(r => (r.datetime || '').slice(0, 4) === chosen).forEach(r => {
+      const m = (r.datetime || '').slice(0, 7);
+      if (!m) return;
+      if (!mMap[m]) mMap[m] = { total:0, biz:0, rech:0, man:0, cnt:0 };
+      const b = mMap[m];
+      b.total += (Number(r.amount) || 0);
+      if (r.bizRevenue) b.biz += (Number(r.amount) || 0);
+      if (r.recharge) b.rech += (Number(r.amount) || 0);
+      if (r.manual) b.man += (Number(r.amount) || 0);
+      b.cnt++;
+    });
+    const months = Object.keys(mMap).sort((a,b)=>b.localeCompare(a));
+    mBody.innerHTML = months.length === 0
+      ? `<tr><td colspan="7" style="padding:28px 0;text-align:center;color:var(--muted);font-size:13px;">${chosen ? chosen + ' 年暂无收入数据' : '暂无收入数据'}</td></tr>`
+      : months.map(m => {
+          const b = mMap[m];
+          return `<tr>
+            <td style="font-weight:600;">${m.replace('-', ' 年 ')} 月</td>
+            <td style="font-weight:700;color:var(--accent);">${fmtMoney(b.total)}</td>
+            <td>${fmtMoney(b.biz)}</td>
+            <td>${fmtMoney(b.rech)}</td>
+            <td>${fmtMoney(b.man)}</td>
+            <td>${b.cnt} 笔</td>
+            <td><button class="btn-ghost xsmall" onclick="viewIncomeMonth('${m}')">📋 查看月明细</button></td>
+          </tr>`;
+        }).join('');
+  }
+}
+function viewIncomeYear(year) {
+  window._incCustomRange = { year: String(year) };
+  renderIncome();
+  const wrap = document.getElementById('incTableBody')?.closest('.table-wrap');
+  if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function viewIncomeMonth(ym) {
+  window._incCustomRange = { month: String(ym) };
+  renderIncome();
+  const wrap = document.getElementById('incTableBody')?.closest('.table-wrap');
+  if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function clearIncomeCustomRange() {
+  window._incCustomRange = null;
 }
 
 // -------- 收入：弹窗 & 保存 --------
