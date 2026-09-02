@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.91',
+  appVersion: '1.0.92',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -2418,6 +2418,12 @@ function switchPage(name) {
       State.curSelectedDay = t;
       renderDayDetail(t);
     }
+  }
+  if (name === 'settings') {
+    try { renderUserTable(); } catch(_){}
+    try { if (typeof renderCloudSyncUI === 'function') renderCloudSyncUI(); } catch(_){}
+    try { renderDeviceSyncUI(); } catch(_){}
+    try { renderDataMaintenance(); } catch(_){}
   }
   // 滚动到顶
   window.scrollTo({ top: 0, behavior: 'smooth' });
