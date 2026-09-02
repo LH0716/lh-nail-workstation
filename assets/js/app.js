@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.92',
+  appVersion: '1.0.93',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -5306,7 +5306,7 @@ function confirmCompletePayment() {
     State.memberTxns.unshift({
       id: joinTxId, cid: c.id, type: 'recharge', subtype,
       amount: fee, payMethod: _payMethodLabel(method),
-      date: todayDateStr(),
+      date: ((a.datetime || todayDateStr())).slice(0,10),
       remark: `预约结算同步办理 · ${a.id}`,
       items: null, balanceAfter: c.balance,
       beforeState: { level: prevLevel, balance: prevBalance, expire: prevExpire },
@@ -6933,6 +6933,8 @@ function openRechargeModal() {
   document.getElementById('rc_amount').value = '';
   document.getElementById('rc_fee').value = '';
   document.getElementById('rc_remark').value = '';
+  const rcd = document.getElementById('rc_date');
+  if (rcd) rcd.value = todayDateStr();
   document.querySelectorAll('input[name="rcType"]').forEach(r => r.checked = r.value === 'balance');
   document.querySelectorAll('input[name="rcUpgrade"]').forEach(r => r.checked = false);
   document.getElementById('rc_years').value = '1';
@@ -7031,7 +7033,7 @@ function confirmRecharge() {
   // 保存交易记录
   State.memberTxns.unshift({
     id: genId('T'), cid, type: 'recharge', subtype,
-    amount, payMethod, date: todayDateStr(), remark,
+    amount, payMethod, date: (document.getElementById('rc_date')?.value || todayDateStr()), remark,
     items: null, balanceAfter: newBalance,
     beforeState,
     afterState: { level: c.level || '', balance: Number(c.balance) || 0, expire: c.expire || '' }
