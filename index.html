@@ -14,7 +14,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/icons/icon-192.svg">
 <link rel="apple-touch-icon" href="assets/icons/icon-192.svg">
 <title>LH Nail 美甲工作台</title>
-<link rel="stylesheet" href="assets/css/style.css?v=1.0.93">
+<link rel="stylesheet" href="assets/css/style.css?v=1.0.94">
 </head>
 <body>
 
@@ -394,7 +394,7 @@
       <div class="section-head">
         <h2 class="section-title editable" data-field="incomePageTitle">💰 收入管理</h2>
         <div class="head-actions">
-          <select class="filter-select" id="incRange" onchange="renderIncome()">
+          <select class="filter-select" id="incRange" onchange="clearIncomeCustomRange();renderIncome()">
             <option value="today">今天</option>
             <option value="week" selected>本周</option>
             <option value="month">本月</option>
@@ -488,9 +488,46 @@
         </div>
       </div>
 
+      <!-- 按月/按年统计 -->
+      <div class="section-block" id="incMonthlyBlock" style="margin:0 0 24px 0;">
+        <div class="section-head">
+          <h2 class="section-title" style="font-size:16px;">📊 按月 / 按年统计</h2>
+          <span class="head-date" style="color:var(--muted);font-size:12px;">点击「查看明细」可切换下方收入明细到对应年份 / 月份</span>
+        </div>
+        <div style="margin-bottom:18px;">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--ink);">🗓 按年汇总</div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>年份</th><th>总收入</th><th>营业收入</th><th>会员充值</th><th>其他收入</th><th>笔数</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="incYearStats"></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--ink);">
+            📅 按月明细
+            <select class="filter-select xsmall" id="incYearSelect" onchange="renderIncomeMonthlyStats()" style="margin-left:8px;"></select>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>月份</th><th>总收入</th><th>营业收入</th><th>会员充值</th><th>其他收入</th><th>笔数</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="incMonthStats"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <!-- 收入明细 -->
       <div class="section-head" style="margin-top:0;margin-bottom:14px;">
-        <h2 class="section-title" style="font-size:16px;">📋 收入明细</h2>
+        <h2 class="section-title" style="font-size:16px;">📋 收入明细 <small id="incRangeLabel" style="color:var(--accent);font-weight:600;font-size:12px;margin-left:4px;"></small></h2>
         <span class="head-date" id="incCount" style="color:var(--muted);font-size:12px;">共 0 条</span>
       </div>
       <div class="filter-bar" style="margin-bottom:14px;">
@@ -2476,9 +2513,9 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<script src="assets/js/supabase.min.js?v=1.0.93" charset="UTF-8"></script>
-<script src="assets/js/supabase-config.js?v=1.0.93" charset="UTF-8"></script>
-<script src="assets/js/app.js?v=1.0.93" charset="UTF-8"></script>
+<script src="assets/js/supabase.min.js?v=1.0.94" charset="UTF-8"></script>
+<script src="assets/js/supabase-config.js?v=1.0.94" charset="UTF-8"></script>
+<script src="assets/js/app.js?v=1.0.94" charset="UTF-8"></script>
 <!-- 🛡️ 后置保护：app.js 加载后立即检查并强制禁用旧版 purge 函数 -->
 </body>
 </html>
