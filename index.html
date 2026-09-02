@@ -14,7 +14,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/icons/icon-192.svg">
 <link rel="apple-touch-icon" href="assets/icons/icon-192.svg">
 <title>LH Nail 美甲工作台</title>
-<link rel="stylesheet" href="assets/css/style.css?v=1.0.90">
+<link rel="stylesheet" href="assets/css/style.css?v=1.0.91">
 </head>
 <body>
 
@@ -1249,6 +1249,15 @@
           </label>
           <button class="btn-ghost danger" onclick="clearAllData()" style="border-color:#F2CFCF;color:#C75A5A;">🗑️ 清空全部数据</button>
         </div>
+        <div id="forceCloudPanel" style="display:none;margin-top:14px;padding:14px;border-radius:12px;background:linear-gradient(135deg,#FFF4E5,#FFF8EF);border:1px solid #F0D9A8;">
+          <div style="font-weight:600;color:#B8860B;font-size:14px;">🔒 强制云端清理模式进行中</div>
+          <div style="font-size:12.5px;color:#8a6d3b;margin:8px 0 12px;line-height:1.8;">
+            本机旧数据已按云端清空。为防止某台设备把旧数据带回云端，清理模式期间录入受限。<br>
+            <b>请确认所有设备（手机/电脑）都已打开过工作台、并都看到本提示</b>，再点击下方按钮恢复正常同步。<br>
+            恢复正常后即可正常录入数据，不会再被清空。
+          </div>
+          <button class="btn-primary" onclick="finishForceCloud()">✅ 完成清理，恢复正常同步</button>
+        </div>
         <div style="margin-top:14px;font-size:12px;color:var(--muted);line-height:1.8;">
           📦 导出文件包含：appointments（预约）· customers（顾客档案）· memberTxns（会员充值扣卡记录）· manualIncomes（手动收入）· expenses（支出/进货）· images（压缩图片仓）· prices（定价）· calColors（日历项目色）· settings（自定义背景图/店铺名）· users（账号权限数据）· auditLogs（审计日志）
           <br>⚠️ 「清空数据」操作不可逆，建议先导出备份再执行
@@ -2462,9 +2471,9 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<script src="assets/js/supabase.min.js?v=1.0.90" charset="UTF-8"></script>
-<script src="assets/js/supabase-config.js?v=1.0.90" charset="UTF-8"></script>
-<script src="assets/js/app.js?v=1.0.90" charset="UTF-8"></script>
+<script src="assets/js/supabase.min.js?v=1.0.91" charset="UTF-8"></script>
+<script src="assets/js/supabase-config.js?v=1.0.91" charset="UTF-8"></script>
+<script src="assets/js/app.js?v=1.0.91" charset="UTF-8"></script>
 <!-- 🛡️ 后置保护：app.js 加载后立即检查并强制禁用旧版 purge 函数 -->
 </body>
 </html>
