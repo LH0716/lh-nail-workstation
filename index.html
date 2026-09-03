@@ -14,7 +14,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/icons/icon-192.svg">
 <link rel="apple-touch-icon" href="assets/icons/icon-192.svg">
 <title>LH Nail 美甲工作台</title>
-<link rel="stylesheet" href="assets/css/style.css?v=1.0.98">
+<link rel="stylesheet" href="assets/css/style.css?v=1.0.99">
 </head>
 <body>
 
@@ -1752,7 +1752,13 @@
         </div>
         <div class="form-item">
           <label>预约时间 *</label>
-          <input type="datetime-local" class="form-input" id="f_datetime" onchange="previewApptConflict();refreshApptDeductLinkOptions()" oninput="refreshApptDeductLinkOptions()">
+          <div class="appt-dt-row">
+            <input type="date" class="form-input" id="f_date" onchange="syncFDateTime();previewApptConflict();refreshApptDeductLinkOptions()">
+            <select class="form-input appt-dt-h" id="f_hour" onchange="syncFDateTime();previewApptConflict();refreshApptDeductLinkOptions()"></select>
+            <span class="appt-dt-colon">:</span>
+            <select class="form-input appt-dt-m" id="f_min" onchange="syncFDateTime();previewApptConflict();refreshApptDeductLinkOptions()"></select>
+          </div>
+          <input type="hidden" id="f_datetime">
         </div>
         <div class="form-item">
           <label>服务人员 / 技师</label>
@@ -2661,9 +2667,9 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<script src="assets/js/supabase.min.js?v=1.0.98" charset="UTF-8"></script>
-<script src="assets/js/supabase-config.js?v=1.0.98" charset="UTF-8"></script>
-<script src="assets/js/app.js?v=1.0.98" charset="UTF-8"></script>
+<script src="assets/js/supabase.min.js?v=1.0.99" charset="UTF-8"></script>
+<script src="assets/js/supabase-config.js?v=1.0.99" charset="UTF-8"></script>
+<script src="assets/js/app.js?v=1.0.99" charset="UTF-8"></script>
 <!-- 🛡️ 后置保护：app.js 加载后立即检查并强制禁用旧版 purge 函数 -->
 </body>
 </html>
