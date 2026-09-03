@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.98',
+  appVersion: '1.0.99',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -2323,9 +2323,55 @@ function init() {
   // 渲染日历
   try { renderCalendar(); } catch(e) { console.warn('renderCalendar:', e); }
 
-  // 默认时间
+  // 默认时间（下午 1 点，分钟 10 分钟粒度）
   const dt = document.getElementById('f_datetime');
-  if (dt) dt.value = getToday(14, 0);
+  if (dt) dt.value = getToday(13, 0);
+  populateFDateTimePicker();
+}
+
+// ============ 预约时间自定义选择器（分钟 10 分钟一个跨度） ============
+function initApptTimePicker() {
+  const h = document.getElementById('f_hour');
+  if (!h || h.dataset.init) return;
+  for (let i = 0; i < 24; i++) {
+    const v = String(i).padStart(2, '0');
+    h.add(new Option(v, v));
+  }
+  h.dataset.init = '1';
+}
+function buildMinOptions(keep) {
+  const m = document.getElementById('f_min');
+  if (!m) return;
+  const cur = m.value;
+  m.innerHTML = '';
+  ['00', '10', '20', '30', '40', '50'].forEach(x => m.add(new Option(x, x)));
+  // 编辑回填时若分钟非 10 倍数，保留原值选项（不改变已录入时间）
+  if (keep && !['00', '10', '20', '30', '40', '50'].includes(keep)) m.add(new Option(keep, keep));
+  if (['00', '10', '20', '30', '40', '50'].includes(cur)) m.value = cur;
+}
+function populateFDateTimePicker() {
+  const dt = document.getElementById('f_datetime');
+  const d = document.getElementById('f_date');
+  const h = document.getElementById('f_hour');
+  const m = document.getElementById('f_min');
+  if (!dt || !d || !h || !m) return;
+  initApptTimePicker();
+  const v = dt.value || '';
+  const mm = v.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+  if (!mm) return;
+  d.value = mm[1];
+  h.value = mm[2];
+  buildMinOptions(mm[3]);
+  m.value = mm[3];
+  syncFDateTime();
+}
+function syncFDateTime() {
+  const dt = document.getElementById('f_datetime');
+  const d = document.getElementById('f_date');
+  const h = document.getElementById('f_hour');
+  const m = document.getElementById('f_min');
+  if (!dt || !d || !h || !m) return;
+  dt.value = (d.value && h.value && m.value) ? `${d.value}T${h.value}:${m.value}` : '';
 }
 
 function applyCustomText() {
@@ -2625,8 +2671,8 @@ function renderApptTable() {
 
 function defaultApptDatetimeForDate(dateStr) {
   const ds = String(dateStr || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) return `${ds}T14:00`;
-  return getToday(14, 0);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) return `${ds}T13:00`;
+  return getToday(13, 0);
 }
 
 // ============ 新建/编辑预约弹窗 ============
@@ -2674,6 +2720,7 @@ function openApptModal(id = null, defaultDate = null) {
   document.getElementById('f_remark').value = '';
   document.getElementById('f_customPrice').value = '';
   document.getElementById('f_datetime').value = defaultApptDatetimeForDate(defaultDate);
+  populateFDateTimePicker();
   if (document.getElementById('f_duration')) document.getElementById('f_duration').value = durationMinutesToHoursValue(defaultApptDurationMinutes(State.biz), State.biz);
   renderStaffOptions('');
   const hint = document.getElementById('apptConflictHint');
@@ -2702,6 +2749,7 @@ function openApptModal(id = null, defaultDate = null) {
       document.getElementById('f_member').value = a.member;
       document.getElementById('f_remark').value = a.remark || '';
       document.getElementById('f_datetime').value = a.datetime;
+      populateFDateTimePicker();
       if (document.getElementById('f_duration')) document.getElementById('f_duration').value = durationMinutesToHoursValue(getApptDuration(a), a.biz || State.biz);
       renderStaffOptions(a.staffId || a.technicianId || a.serviceStaffId || '');
       State.refImages = [...(a.images || [])];
