@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.97',
+  appVersion: '1.0.98',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -11611,8 +11611,9 @@ function _sbOpenDrawer() {
   if (!mask) {
     mask = document.createElement('div');
     mask.id = 'mobileMask';
-    // z-index 提到 99999：确保在所有弹窗(999)之上，点击必达遮罩
-    mask.style.cssText = 'position:fixed;inset:0;background:rgba(12,28,46,0.58);z-index:99999;';
+    // z-index 209：低于侧边栏(210) 保证不遮住菜单，高于主页面内容
+    // （残留弹窗盖住遮罩的问题由上方"强制关闭所有弹窗"解决，不能靠抬高 z-index）
+    mask.style.cssText = 'position:fixed;inset:0;background:rgba(12,28,46,0.58);z-index:209;';
     mask.addEventListener('click', () => _sbCloseDrawer());
     document.body.appendChild(mask);
   }
@@ -11690,21 +11691,17 @@ function toggleSidebar() {
   }, { passive: true });
 })();
 
-// 页面切换时自动关闭移动端侧栏抽屉（桌面端折叠状态保持用户偏好）
-const _origNav = typeof navigateTo === 'function' ? navigateTo : null;
-if (_origNav) {
-  window.navigateTo = function(page) {
+// 页面切换时自动关闭移动端侧栏抽屉 + 清理弹窗（桌面端折叠状态保持用户偏好）
+// 注：页面切换真实入口是 switchPage（navigateTo 已不存在，勿再引用）
+(function patchSwitchPageCloseDrawer() {
+  const _orig = window.switchPage;
+  if (typeof _orig !== 'function') return;
+  window.switchPage = function(page) {
     if (!_sbIsDesktop()) _sbCloseDrawer();
     document.querySelectorAll('.modal.show').forEach(m => m.classList.remove('show'));
-    _origNav(page);
-    if (page === 'stats') setTimeout(renderStats, 50);
-    if (page === 'settings') {
-      setTimeout(renderUserTable, 50);
-      setTimeout(renderDataMaintenance, 70);
-    }
-    if (page === 'monthlyReport') setTimeout(renderMonthlyReport, 50);
+    _orig(page);
   };
-}
+})();
 
 // 兜底：移动端点主页面任意区域（非侧边栏、非汉堡按钮）也关闭抽屉，
 // 防止偶发情况下遮罩点击事件丢失导致侧边栏收不回（点击主页面无反应）
