@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.94',
+  appVersion: '1.0.95',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -3006,7 +3006,21 @@ function renderDashboardSummary() {
     dateEl.textContent = `${d.getMonth()+1}月${d.getDate()}日 · ${w}`;
   }
   const todayStr = todayDateStr();
-  const monthStr = todayStr.slice(0,7);
+  let monthStr = todayStr.slice(0,7);
+  let monthLabel = '本月营业额';
+  // 🔄 数据永存：首页可查看历史任意月份营业额（默认本月）
+  try {
+    const sumSel = document.getElementById('sumMonthSel');
+    if (sumSel) {
+      if (sumSel.value) monthStr = sumSel.value;
+      sumSel.value = monthStr;
+    }
+    if (monthStr !== todayStr.slice(0,7)) {
+      monthLabel = Number(monthStr.slice(5,7)) + '月营业额（' + monthStr.slice(0,4) + '）';
+      const ml = document.getElementById('sumMonthLabel');
+      if (ml) ml.textContent = monthLabel;
+    }
+  } catch(e){}
   // 今日预约数
   const todayAppts = activeRows(State.appointments).filter(a => a.status !== 'canceled' && (a.datetime||'').startsWith(todayStr));
   const apptToday = todayAppts.length;
@@ -5781,18 +5795,17 @@ function renderCustomerStats() {
   const ym = now.toISOString().slice(0,7); // YYYY-MM
   const thisYear = now.getFullYear();
 
-  // 本月新增（首次到店月份=本月）
-  const monthNew = activeRows(State.customers).filter(c => (c.firstVisit||'').startsWith(ym)).length;
-  // 本月回头客：本月有到店（lastVisit本月）且 visits>=2
-  const monthRet = activeRows(State.customers).filter(c => {
-    const last = c.lastVisit || '';
-    return last.startsWith(ym) && (c.visits||0) >= 2;
-  }).length;
-  // 年度回头客：今年到店过且 visits>=2
-  const yearRet = activeRows(State.customers).filter(c => {
-    const last = c.lastVisit || '';
-    return last.startsWith(String(thisYear)) && (c.visits||0) >= 2;
-  }).length;
+  // 实时口径：本月新增（首次到店月=本月）/ 本月回头客 / 年度回头客
+  let monthNew = 0, monthRet = 0, yearRet = 0;
+  activeRows(State.customers).forEach(c => {
+    const all = _customerRealStats(c, '');
+    if (all.visits === 0) return;
+    const firstYm = String(all.first || c.firstVisit || '').slice(0, 7);
+    const mCnt = _customerRealStats(c, ym).visits;
+    if (firstYm === ym) monthNew++;
+    else if (mCnt > 0) monthRet++;
+    if (_customerRealStats(c, String(thisYear)).visits > 0 && all.visits >= 2) yearRet++;
+  });
 
   document.getElementById('csTotal').textContent = total + ' 人';
   document.getElementById('csMonthNew').textContent = monthNew + ' 人';
@@ -5803,24 +5816,100 @@ function renderCustomerStats() {
 /* ============================================================
    3.1 顾客统计详情（本月新增 / 本月回头 / 年度回头 下钻）
    ============================================================ */
-function _customerRangeStatsByPrefix(c, prefix) {
-  // 统计顾客在指定年月前缀（YYYY-MM 或 YYYY）内的到店次数与消费金额
-  let visits = 0, paid = 0;
-  activeRows(State.memberTxns).forEach(t => {
-    if (t._auditOnly) return;
-    if (t._reversed) return;
-    if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return;
-    if (t.cid !== c.id || t.type !== 'deduct') return;
-    if (!String(t.date || '').startsWith(prefix)) return;
+/* 实时统计：顾客到店次数与消费金额（基于完成预约 + 手动收入，不依赖档案字段）
+   prefix: '' 全部 / 'YYYY' 年 / 'YYYY-MM' 月；返回 { visits, paid, last, first } */
+function _customerRealStats(c, prefix) {
+  let visits = 0, paid = 0, last = '', first = '';
+  const cn = _normStr(c.name || '');
+  activeRows(State.appointments).forEach(a => {
+    if (a._deleted) return;
+    if (normalizeApptStatus(a.status) !== 'done') return;
+    const matched = a.customerId === c.id || (cn && _normStr(a.customer || '') === cn);
+    if (!matched) return;
+    const day = String(a.datetime || a.date || '');
+    if (prefix && !day.startsWith(prefix)) return;
     visits++;
-    paid += t.amount || 0;
+    paid += Number(a.finalTotal || a.payAmount || 0) || 0;
+    if (day) {
+      const d10 = day.slice(0, 10);
+      if (!last || d10 > last) last = d10;
+      if (!first || d10 < first) first = d10;
+    }
   });
-  // 无扣卡记录但最近到店落在范围内：按预约完成兜底 1 次（与到店排行口径一致）
-  if ((c.lastVisit || '').startsWith(prefix) && visits === 0) {
-    visits = 1;
-    paid = c.totalPaid ? Math.min(c.totalPaid, 120) : 0;
-  }
-  return { visits, paid };
+  activeRows(State.manualIncomes).forEach(m => {
+    const matched = m.customerId === c.id || (cn && _normStr(m.customerName || '') === cn);
+    if (!matched) return;
+    const day = String(m.date || '');
+    if (prefix && !day.startsWith(prefix)) return;
+    paid += Number(m.amount) || 0;
+  });
+  return { visits, paid, last, first };
+}
+
+/* 顾客某年的逐月到店次数（12 项，基于完成预约） */
+function _customerYearMonths(c, year) {
+  const months = Array(12).fill(0);
+  const cn = _normStr(c.name || '');
+  activeRows(State.appointments).forEach(a => {
+    if (a._deleted) return;
+    if (normalizeApptStatus(a.status) !== 'done') return;
+    const matched = a.customerId === c.id || (cn && _normStr(a.customer || '') === cn);
+    if (!matched) return;
+    const day = String(a.datetime || a.date || '');
+    const m = day.slice(0, 7).split('-')[1];
+    if (Number(day.slice(0, 4)) === year && m) months[Number(m) - 1]++;
+  });
+  return months;
+}
+
+/* 某期（YYYY 或 YYYY-MM）到店顾客中 新客 vs 回头客 人数
+   回头客 = 该期到店 且 历史累计到店≥2；新客 = 该期到店 且 历史累计到店=1（首次） */
+function _custSplit(prefix) {
+  let ret = 0, nw = 0;
+  activeRows(State.customers).forEach(c => {
+    const all = _customerRealStats(c, '');
+    if (all.visits === 0) return;
+    if (_customerRealStats(c, prefix).visits === 0) return;
+    if (all.visits >= 2) ret++; else nw++;
+  });
+  return { ret, nw };
+}
+
+/* 有到店/建档数据的年份列表（倒序） */
+function _structYears() {
+  const years = new Set();
+  activeRows(State.appointments).forEach(a => {
+    if (a._deleted || normalizeApptStatus(a.status) !== 'done') return;
+    const y = String(a.datetime || a.date || '').slice(0, 4);
+    if (/^\d{4}$/.test(y)) years.add(y);
+  });
+  activeRows(State.customers).forEach(c => {
+    const f = String(c.firstVisit || '').slice(0, 4);
+    if (/^\d{4}$/.test(f)) years.add(f);
+  });
+  return Array.from(years).sort().reverse();
+}
+
+/* 距今天数 / 展示 */
+function _daysSince(d) {
+  if (!d) return null;
+  const t = new Date(d).getTime();
+  if (isNaN(t)) return null;
+  return Math.floor((new Date().getTime() - t) / 86400000);
+}
+function _daysSinceLabel(d) {
+  const n = _daysSince(d);
+  if (n === null) return '<span style="color:var(--muted)">—</span>';
+  if (n < 0 || n === 0) return '<span style="color:var(--success)">今天</span>';
+  if (n <= 7) return `<span style="color:var(--success)">${n} 天</span>`;
+  if (n <= 30) return `<span>${n} 天</span>`;
+  if (n <= 60) return `<span style="color:#C77700;font-weight:600;">${n} 天</span>`;
+  return `<span style="color:var(--danger);font-weight:700;">${n} 天</span>`;
+}
+
+/* 兼容旧调用：范围内到店/消费 */
+function _customerRangeStatsByPrefix(c, prefix) {
+  return _customerRealStats(c, prefix);
 }
 
 function renderCustomerStatDetail(type) {
@@ -5832,32 +5921,36 @@ function renderCustomerStatDetail(type) {
       title: '🆕 本月新增顾客详情', prefix: ym,
       rangeLabel: '本月到店', spendLabel: '本月消费',
       sumLabel: '本月新增',
-      filter: c => (c.firstVisit || '').startsWith(ym),
+      filter: c => (c._firstYm || (c.firstVisit || '').slice(0,7)) === ym,
       subNote: '首次到店月份=' + ym
     },
     monthRet: {
       title: '🔁 本月回头客详情', prefix: ym,
       rangeLabel: '本月到店', spendLabel: '本月消费',
       sumLabel: '本月回头',
-      filter: c => (c.lastVisit || '').startsWith(ym) && (c.visits || 0) >= 2,
+      filter: c => c._v >= 1 && c._vAll >= 2,
       subNote: '本月到店且累计到店≥2 次'
     },
     yearRet: {
       title: '🏆 年度回头客总数详情', prefix: yearStr,
       rangeLabel: '今年到店', spendLabel: '今年消费',
       sumLabel: '年度回头',
-      filter: c => (c.lastVisit || '').startsWith(yearStr) && (c.visits || 0) >= 2,
+      filter: c => c._v >= 1 && c._vAll >= 2,
       subNote: '今年到店且累计到店≥2 次'
     }
   }[type];
   if (!cfg) return;
 
   const list = activeRows(State.customers)
-    .filter(cfg.filter)
     .map(c => {
       const st = _customerRangeStatsByPrefix(c, cfg.prefix);
-      return Object.assign({}, c, { _v: st.visits, _p: st.paid });
-    });
+      const stAll = _customerRangeStatsByPrefix(c, '');
+      return Object.assign({}, c, {
+        _v: st.visits, _p: st.paid, _vAll: stAll.visits,
+        _firstYm: String(stAll.first || '').slice(0, 7)
+      });
+    })
+    .filter(cfg.filter);
   // 排序：范围消费高优先 → 范围到店次数 → 最近到店
   list.sort((a, b) => (b._p - a._p) || (b._v - a._v) || String(b.lastVisit || '').localeCompare(String(a.lastVisit || '')));
 
@@ -5916,7 +6009,7 @@ function renderCustomerStatDetail(type) {
       <td>${escapeHtml(c.phone || '-')}</td>
       <td>${mem.tag ? `<span class="${mem.cls}">${mem.tag}</span>` : '<span style="color:var(--muted)">非会员</span>'}</td>
       <td style="font-weight:700;color:var(--accent);">${c._v} 次</td>
-      <td>${c.visits || 0} 次</td>
+      <td>${c._vAll} 次</td>
       <td style="color:var(--ink);font-weight:600;">${fmtMoney(c._p)}</td>
       <td>${escapeHtml(c.lastVisit || '-')}</td>
       <td><button class="btn-ghost xsmall" onclick="openCustomerTxns('${c.id}')" title="查看该顾客在本店的所有消费记录与总金额">💳 消费记录</button></td>
@@ -6098,8 +6191,10 @@ function renderNewCustChart() {
   const y = +sel.value;
   const counts = Array(12).fill(0);
   activeRows(State.customers).forEach(c => {
-    if (!c.firstVisit) return;
-    const d = new Date(c.firstVisit);
+    const all = _customerRealStats(c, '');
+    const f = String(all.first || c.firstVisit || '').slice(0, 7);
+    if (!f) return;
+    const d = new Date(f + '-01');
     if (d.getFullYear() !== y) return;
     counts[d.getMonth()]++;
   });
@@ -6115,9 +6210,11 @@ function renderNewCustChart() {
   counts.forEach((v,i)=>{ if (v > topV) { topV = v; topIdx = i; }});
   // 对比上一年
   const prevCounts = _getPrevYearCounts(y, (c, py) => {
-    if (!c.firstVisit) return null;
-    const d = new Date(c.firstVisit);
-    return d.getFullYear() === py ? d.getMonth() : null;
+    const all2 = _customerRealStats(c, '');
+    const f2 = String(all2.first || c.firstVisit || '').slice(0, 7);
+    if (!f2) return null;
+    const d2 = new Date(f2 + '-01');
+    return d2.getFullYear() === py ? d2.getMonth() : null;
   });
   const prevTotal = prevCounts.reduce((s,n)=>s+n,0);
   const diff = total - prevTotal;
@@ -6138,12 +6235,12 @@ function renderRetCustChart() {
   const sel = document.getElementById('retCustYearSel'); if (!sel) return;
   const y = +sel.value;
   const counts = Array(12).fill(0);
-  // 某月回头客 = lastVisit 落在该月 & 顾客 visits>=2（历史累计回头）
+  // 某月回头客 = 该月有完成到店 & 历史累计到店>=2（实时口径）
   activeRows(State.customers).forEach(c => {
-    if (!c.lastVisit || (c.visits||0) < 2) return;
-    const d = new Date(c.lastVisit);
-    if (d.getFullYear() !== y) return;
-    counts[d.getMonth()]++;
+    const all = _customerRealStats(c, '');
+    if (all.visits < 2) return;
+    const mons = _customerYearMonths(c, y);
+    mons.forEach((v, i) => { if (v > 0) counts[i]++; });
   });
   // ---- 新增：3 张迷你汇总卡填充 ----
   const total = counts.reduce((s,n)=>s+n,0);
@@ -6155,9 +6252,12 @@ function renderRetCustChart() {
   counts.forEach((v,i)=>{ if (v > topV) { topV = v; topIdx = i; }});
   // 同比上一年
   const prevCounts = _getPrevYearCounts(y, (c, py) => {
-    if (!c.lastVisit || (c.visits||0) < 2) return null;
-    const d = new Date(c.lastVisit);
-    return d.getFullYear() === py ? d.getMonth() : null;
+    const all2 = _customerRealStats(c, '');
+    if (all2.visits < 2) return null;
+    const mons2 = _customerYearMonths(c, py);
+    let hit = -1;
+    mons2.forEach((v, i) => { if (v > 0 && hit < 0) hit = i; });
+    return hit;
   });
   const prevTotal = prevCounts.reduce((s,n)=>s+n,0);
   const diff = total - prevTotal;
@@ -6187,35 +6287,12 @@ function renderVisitRank() {
   const body = document.getElementById('visitRankBody'); if (!body) return;
   const range = document.getElementById('visitRankRange')?.value || 'all';
   const now = new Date();
-  const threshold = {
-    all: 0,
-    year: new Date(now.getFullYear()-0, now.getMonth(), now.getDate()).setFullYear(now.getFullYear()-1),
-    month: new Date(now.getFullYear(), now.getMonth()-1, now.getDate()).getTime()
-  }[range];
-
   const list = activeRows(State.customers)
     .map(c => {
-      // 根据范围重新计算 visits/累计金额
-      let v = 0, paid = 0, last = c.lastVisit;
-      if (range === 'all') { v = c.visits||0; paid = c.totalPaid||0; }
-      else {
-        // 从交易记录中统计该范围内扣款次数 + 金额
-        activeRows(State.memberTxns).forEach(t => {
-          if (t._auditOnly) return;
-          if (t._reversed) return;
-          if ((t.subtype || '').includes('冲正') || (t.subtype || '').includes('撤销')) return;
-          if (t.cid !== c.id || t.type !== 'deduct') return;
-          if (new Date(t.date).getTime() < threshold) return;
-          v++;
-          paid += t.amount || 0;
-        });
-        // 也包含无扣卡记录但预约已完成的顾客（简单匹配 lastVisit）
-        if (c.lastVisit && new Date(c.lastVisit).getTime() >= threshold && v === 0) {
-          v = 1;
-          paid = c.totalPaid ? Math.min(c.totalPaid, 120) : 0;
-        }
-      }
-      return { ...c, _v: v, _p: paid, _l: last };
+      let st = _customerRealStats(c, '');
+      if (range === 'month') st = _customerRealStats(c, now.toISOString().slice(0,7));
+      else if (/^\d{4}$/.test(range)) st = _customerRealStats(c, range);
+      return { ...c, _v: st.visits, _p: st.paid, _l: c.lastVisit || st.last };
     })
     .filter(c => c._v > 0)
     .sort((a,b) => b._v - a._v || b._p - a._p)
@@ -6249,12 +6326,15 @@ function renderVisitRank() {
 function renderCustomerList() {
   const body = document.getElementById('customerListBody'); if (!body) return;
   const q = (document.getElementById('csSearch')?.value || '').trim().toLowerCase();
-  let list = activeRows(State.customers);
+  let list = activeRows(State.customers).map(c => {
+    const st = _customerRealStats(c, '');
+    return { ...c, _v: st.visits, _p: st.paid, _l: c.lastVisit || st.last };
+  });
   if (q) list = list.filter(c => (c.name||'').toLowerCase().includes(q) || (c.phone||'').includes(q));
-  list.sort((a,b) => (b.lastVisit||'').localeCompare(a.lastVisit||''));
+  list.sort((a,b) => (b._l||'').localeCompare(a._l||''));
 
   if (list.length === 0) {
-    body.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:40px;">暂无顾客，点右上角「+ 新增顾客」添加第一位吧~</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:40px;">暂无顾客，点右上角「+ 新增顾客」添加第一位吧~</td></tr>`;
     return;
   }
 
@@ -6265,15 +6345,128 @@ function renderCustomerList() {
       <td>${escapeHtml(c.phone || '-')}</td>
       <td>${mem.tag ? `<span class="${mem.cls}">${mem.tag}</span>` : '<span style="color:var(--muted)">非会员</span>'}</td>
       <td style="color:var(--success);font-weight:600;">${c.level && c.level!=='gold' ? fmtMoney(c.balance||0) : '-'}</td>
-      <td>${c.firstVisit||'-'}</td>
-      <td>${c.lastVisit||'-'}</td>
-      <td style="font-weight:700;color:var(--accent);">${c.visits||0} 次</td>
-      <td style="color:var(--ink);font-weight:600;">${fmtMoney(c.totalPaid||0)}</td>
+      <td>${escapeHtml(c.firstVisit||'-')}</td>
+      <td>${escapeHtml(c._l||'-')}</td>
+      <td style="font-weight:600;">${_daysSinceLabel(c._l)}</td>
+      <td style="font-weight:700;color:var(--accent);">${c._v} 次</td>
+      <td style="color:var(--ink);font-weight:600;">${fmtMoney(c._p)}</td>
       <td>
         <button class="btn-ghost xsmall" onclick="openCustomerModal(false,'${escapeHtml(c.id)}')">编辑</button>
         <button class="btn-ghost xsmall" onclick="openCustomerTxns('${escapeHtml(c.id)}')" title="查看该顾客在本店的所有消费记录与总金额">💳 消费记录</button>
         <button class="btn-danger xsmall" onclick="deleteCustomer('${escapeHtml(c.id)}')" title="彻底删除顾客档案（会员管理里请用「清卡退会员」以保留数据）">🗑 删除档案</button>
       </td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---- 老顾客排行：年份选择器（全部时间 / 近一月 / 每一年） ---- */
+function initVisitRankSelect() {
+  const sel = document.getElementById('visitRankRange'); if (!sel) return;
+  const cur = sel.value;
+  const years = _structYears();
+  const base = '<option value="all">全部时间</option><option value="month">近一月</option>';
+  sel.innerHTML = base + years.map(y => `<option value="${y}">${y} 年</option>`).join('');
+  if (cur && Array.from(sel.options).some(o => o.value === cur)) sel.value = cur;
+}
+
+/* ---- 新客 · 回头客结构分析 ---- */
+function _stxt(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+
+function renderCustStructure() {
+  const now = new Date();
+  const ym = now.toISOString().slice(0, 7);
+  const thisYear = now.getFullYear();
+  const m = _custSplit(ym);
+  const y = _custSplit(String(thisYear));
+  const mTotal = m.ret + m.nw, yTotal = y.ret + y.nw;
+  _stxt('ssMonthRetPct', mTotal > 0 ? Math.round(m.ret / mTotal * 100) + '%' : '—');
+  _stxt('ssMonthNew', m.nw); _stxt('ssMonthRet', m.ret);
+  _stxt('ssYearRetPct', yTotal > 0 ? Math.round(y.ret / yTotal * 100) + '%' : '—');
+  _stxt('ssYearNew', y.nw); _stxt('ssYearRet', y.ret);
+  // 逐年
+  const years = _structYears();
+  const yearData = years.map(yy => { const ss = _custSplit(String(yy)); return { y: yy, nw: ss.nw, ret: ss.ret }; });
+  let bestYear = null;
+  yearData.forEach(d => { if (d.ret > 0 && (!bestYear || d.ret > bestYear.ret)) bestYear = d; });
+  if (bestYear) {
+    _stxt('ssBestYear', bestYear.y + ' 年');
+    _stxt('ssBestYearSub', '回头客 ' + bestYear.ret + ' 人 · 占比 ' + Math.round(bestYear.ret / (bestYear.ret + bestYear.nw) * 100) + '%');
+  } else { _stxt('ssBestYear', '—'); _stxt('ssBestYearSub', '暂无数据'); }
+  _renderStructBars('custYearChart', 'custYearAxis', yearData.map(d => ({ label: d.y + '年', nw: d.nw, ret: d.ret })));
+  // 逐月年份下拉
+  const sel = document.getElementById('structYearSel');
+  if (sel) {
+    sel.innerHTML = years.map(yy => `<option value="${yy}" ${yy === thisYear ? 'selected' : ''}>${yy} 年</option>`).join('') || `<option value="${thisYear}">${thisYear} 年</option>`;
+  }
+  renderCustStructureMonth();
+}
+
+function renderCustStructureMonth() {
+  const sel = document.getElementById('structYearSel'); if (!sel) return;
+  const y = +sel.value;
+  const months = [];
+  let bestM = null;
+  for (let i = 1; i <= 12; i++) {
+    const ymStr = y + '-' + String(i).padStart(2, '0');
+    const ss = _custSplit(ymStr);
+    months.push({ label: i + '月', nw: ss.nw, ret: ss.ret });
+    if (ss.ret > 0 && (!bestM || ss.ret > bestM.ret)) bestM = { m: i, ret: ss.ret, nw: ss.nw };
+  }
+  if (bestM) {
+    _stxt('ssBestMonth', bestM.m + ' 月');
+    _stxt('ssBestMonthSub', '回头客 ' + bestM.ret + ' 人 · 占比 ' + Math.round(bestM.ret / (bestM.ret + bestM.nw) * 100) + '%');
+  } else { _stxt('ssBestMonth', '—'); _stxt('ssBestMonthSub', '暂无数据'); }
+  _renderStructBars('custMonthChart', null, months.map(d => ({ label: d.label, nw: d.nw, ret: d.ret })));
+}
+
+/* 分组柱：新客(浅蓝) + 回头客(粉) */
+function _renderStructBars(containerId, axisId, data) {
+  const el = document.getElementById(containerId); if (!el) return;
+  const max = Math.max(1, ...data.map(d => Math.max(d.nw, d.ret)));
+  el.innerHTML = data.map(d => {
+    const nh = d.nw > 0 ? Math.max(6, Math.round(d.nw / max * 100)) : 0;
+    const rh = d.ret > 0 ? Math.max(6, Math.round(d.ret / max * 100)) : 0;
+    return `<div class="bar-group" title="新客 ${d.nw} 人 · 回头客 ${d.ret} 人">
+      <div class="bar new" style="height:${nh}%;" data-count="${d.nw}"></div>
+      <div class="bar ret" style="height:${rh}%;" data-count="${d.ret}"></div>
+    </div>`;
+  }).join('');
+  if (axisId) {
+    const ax = document.getElementById(axisId);
+    if (ax) ax.innerHTML = data.map(d => {
+      const t = d.nw + d.ret;
+      const pct = t > 0 ? Math.round(d.ret / t * 100) : 0;
+      return `<span>${d.label}<em class="ax-pct">${pct}%</em></span>`;
+    }).join('');
+  }
+}
+
+/* ---- 沉睡顾客提醒 ---- */
+function renderCustSleepers() {
+  const body = document.getElementById('sleeperBody'); if (!body) return;
+  const range = +(document.getElementById('sleeperRange')?.value || 60);
+  const list = activeRows(State.customers)
+    .map(c => {
+      const st = _customerRealStats(c, '');
+      return { ...c, _v: st.visits, _p: st.paid, _l: c.lastVisit || st.last, _days: _daysSince(c.lastVisit || st.last) };
+    })
+    .filter(c => c._v >= 2 && c._days !== null && c._days > range)
+    .sort((a, b) => (b._days||0) - (a._days||0));
+  if (list.length === 0) {
+    body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:36px;">✅ 没有超过 ${range} 天未到店的回头客，老顾客维护得很好！</td></tr>`;
+    return;
+  }
+  body.innerHTML = list.map(c => {
+    const mem = memberLabel(c.level);
+    return `<tr>
+      <td style="font-weight:600;">${escapeHtml(c.name || '')}</td>
+      <td>${escapeHtml(c.phone || '-')}</td>
+      <td>${mem.tag ? `<span class="${mem.cls}">${mem.tag}</span>` : '<span style="color:var(--muted)">非会员</span>'}</td>
+      <td style="font-weight:700;color:var(--danger);">${c._days} 天</td>
+      <td>${escapeHtml(c._l || '-')}</td>
+      <td style="color:var(--ink);font-weight:600;">${fmtMoney(c._p)}</td>
+      <td>${c._v} 次</td>
+      <td><button class="btn-ghost xsmall" onclick="openCustomerTxns('${escapeHtml(c.id)}')" title="查看该顾客消费记录">💳 消费记录</button></td>
     </tr>`;
   }).join('');
 }
@@ -8058,7 +8251,10 @@ window.switchPage = function(page) {
     initYearSelectors();
     renderNewCustChart();
     renderRetCustChart();
+    initVisitRankSelect();
     renderVisitRank();
+    renderCustStructure();
+    renderCustSleepers();
     renderCustomerList();
   } else if (page === 'members') {
     renderLevelCounts();
@@ -8897,7 +9093,28 @@ function buildExpenseRecords() {
 }
 function renderExpense() {
   const rangeKey = document.getElementById('expRange')?.value || 'month';
-  const range = getRange(rangeKey);
+  // 🔄 数据永存：支持按具体年份查看历史每年支出
+  const exYSel = document.getElementById('expYearSel');
+  const exYVal = exYSel ? exYSel.value : '';
+  let range;
+  if (exYVal) {
+    const y = +exYVal;
+    range = [new Date(y, 0, 1), new Date(y, 11, 31, 23, 59, 59, 999)];
+  } else {
+    range = getRange(rangeKey);
+  }
+  // 填充支出年份选择器（数据永存：列出所有有支出的年份）
+  try {
+    const yrsSet = new Set();
+    buildExpenseRecords().forEach(r => { const y = (r.date || '').slice(0, 4); if (/^\d{4}$/.test(y)) yrsSet.add(y); });
+    const yrs = Array.from(yrsSet).sort().reverse();
+    const exYSel2 = document.getElementById('expYearSel');
+    if (exYSel2) {
+      const prevV = exYSel2.value;
+      exYSel2.innerHTML = '<option value="">全部年份</option>' + yrs.map(y => `<option value="${y}">${y} 年</option>`).join('');
+      exYSel2.value = yrs.includes(prevV) ? prevV : '';
+    }
+  } catch(e){}
   const q = (document.getElementById('expSearch')?.value || '').trim().toLowerCase();
   const fCat = document.getElementById('expCat')?.value || '';
   let all = buildExpenseRecords().filter(r => inRange(r.date + 'T00:00:00', range));
@@ -8909,7 +9126,9 @@ function renderExpense() {
   const op     = all.filter(r => EXP_CAT_META[r.category]?.op).reduce((s,r) => s + Number(r.amount||0), 0);
 
   // 利润 = 同时间范围的营业总收入(bizRevenue+manual) - 总支出
-  const incRange = getRange(rangeKey);
+  const incRange = exYVal
+    ? [new Date(+exYVal, 0, 1), new Date(+exYVal, 11, 31, 23, 59, 59, 999)]
+    : getRange(rangeKey);
   const incBiz = buildIncomeRecords().filter(r => inRange(r.datetime, incRange) && (r.bizRevenue || r.manual))
     .reduce((s,r) => s + Number(r.amount||0), 0);
   const profit = incBiz - total;
@@ -10473,7 +10692,18 @@ function clearAuditLogs() {
    ============================================================ */
 function renderStats() {
   const rangeKey = document.getElementById('stRange')?.value || 'month';
-  const range = getRange(rangeKey);
+  // 🔄 数据永存：支持按具体年份查看历史数据（2026/2027/… 任一有数据的年份）
+  const stYSel = document.getElementById('stYearSel');
+  const stYVal = stYSel ? stYSel.value : '';
+  let range, prevRange;
+  if (stYVal) {
+    const y = +stYVal;
+    range = [new Date(y, 0, 1), new Date(y, 11, 31, 23, 59, 59, 999)];
+    prevRange = [new Date(y - 1, 0, 1), new Date(y - 1, 11, 31, 23, 59, 59, 999)];
+  } else {
+    range = getRange(rangeKey);
+    prevRange = getPrevRange(rangeKey);
+  }
   const inRange0 = (dt) => inRange(dt, range);
 
   // 收入流水
@@ -10520,8 +10750,7 @@ function renderStats() {
   const backCnt = Object.values(visits).filter(n => n >= 2).length;
   const retRate = orders > 0 ? (backCnt / Math.max(1, Object.keys(visits).length) * 100) : 0;
 
-  // 环比：上一个区间
-  const prevRange = getPrevRange(rangeKey);
+  // 环比：上一个区间（选年份时为上一年）
   const inPrev = (dt) => inRange(dt, prevRange);
   const prevRev = buildIncomeRecords().filter(r => inPrev(r.datetime||r.date)).reduce((s,r)=>s+r.amount,0);
   const prevExp = activeRows(State.expenses).filter(e => inPrev(e.date)).reduce((s,e)=>s+(Number(e.amount)||0),0);
@@ -10573,8 +10802,8 @@ function renderStats() {
   renderMiniBar('stRevBar', lastNDaysRevenue(14, false), false);
   renderMiniBar('stExpBar', lastNDaysExpense(14), true);
 
-  // ---- 营收趋势图：本年 12 个月 ----
-  renderRevTrendChart();
+  // ---- 营收趋势图（选年份时按该年 12 个月，否则当年） ----
+  renderRevTrendChart(stYVal ? +stYVal : null);
 
   // ---- 美甲 vs 美睫（收入维度） ----
   const nailAmt = incAll.filter(r => r.type==='appt-nail').reduce((s,r)=>s+r.amount,0);
@@ -10589,8 +10818,23 @@ function renderStats() {
   // ---- 会员消费 TOP10 ----
   renderMemberRank(incAll);
 
-  // ---- 回头客分析（近 6 个月） ----
-  renderRepeatChart();
+  // ---- 回头客分析（选年份时按该年 12 个月，否则近 6 个月） ----
+  renderRepeatChart(stYVal ? +stYVal : null);
+
+  // 🔄 填充年份选择器（数据永存：列出所有有数据的年份，含收入/支出/预约）
+  try {
+    const yrsSet = new Set();
+    buildIncomeRecords().forEach(r => { const y = (r.datetime || '').slice(0, 4); if (/^\d{4}$/.test(y)) yrsSet.add(y); });
+    activeRows(State.expenses).forEach(e => { const y = (e.date || '').slice(0, 4); if (/^\d{4}$/.test(y)) yrsSet.add(y); });
+    activeRows(State.appointments).forEach(a => { if (a.status !== 'canceled') { const y = (a.datetime || '').slice(0, 4); if (/^\d{4}$/.test(y)) yrsSet.add(y); } });
+    const yrs = Array.from(yrsSet).sort().reverse();
+    const stYSel2 = document.getElementById('stYearSel');
+    if (stYSel2) {
+      const prevV = stYSel2.value;
+      stYSel2.innerHTML = '<option value="">全部年份</option>' + yrs.map(y => `<option value="${y}">${y} 年</option>`).join('');
+      stYSel2.value = yrs.includes(prevV) ? prevV : '';
+    }
+  } catch(e){}
 }
 
 // mini 柱状
@@ -10626,11 +10870,13 @@ function lastNDaysExpense(n) {
   return arr;
 }
 
-// 营收趋势：本年 12 个月
-function renderRevTrendChart() {
+// 营收趋势：按年 12 个月（默认当年；传入年份可查看历史年份）
+function renderRevTrendChart(year) {
   const box = document.getElementById('stRevTrendChart'); if (!box) return;
   const now = new Date();
-  const Y = now.getFullYear();
+  const Y = year || now.getFullYear();
+  const sub = document.getElementById('stTrendSub');
+  if (sub) sub.textContent = Y + ' 年 12 个月';
   const labels = [], revA = [], expA = [], profitA = [];
   const incAll = buildIncomeRecords();
   for (let m = 0; m < 12; m++) {
@@ -10756,13 +11002,20 @@ function renderMemberRank(incAll) {
     </div>`).join('')}</div>`;
 }
 
-// 回头客分析（近 6 个月）
-function renderRepeatChart() {
+// 回头客分析（默认近 6 个月；传入年份则按该年 12 个月查看）
+function renderRepeatChart(year) {
   const box = document.getElementById('stRepeatChart'); if (!box) return;
   const now = new Date(); now.setDate(1); now.setHours(0,0,0,0);
   const rows = [];
-  for (let i = 5; i >= 0; i--) {
-    const ym = new Date(now.getFullYear(), now.getMonth() - i, 1);
+  let monthsIdx;
+  if (year) {
+    monthsIdx = []; for (let m = 0; m < 12; m++) monthsIdx.push(m); // 0..11 按自然月
+  } else {
+    monthsIdx = []; for (let i = 5; i >= 0; i--) monthsIdx.push(-i); // 近 6 个月
+  }
+  const monthLabel = (y, mo) => y + '/' + String(mo + 1).padStart(2, '0');
+  monthsIdx.forEach(off => {
+    const ym = year ? new Date(year, off, 1) : new Date(now.getFullYear(), now.getMonth() + off, 1);
     const s = ym.getTime();
     const e = new Date(ym.getFullYear(), ym.getMonth()+1, 1).getTime() - 1;
     const ords = activeRows(State.appointments).filter(a => a.status !== 'canceled' && (new Date(a.datetime).getTime() >= s) && (new Date(a.datetime).getTime() <= e));
@@ -10771,8 +11024,8 @@ function renderRepeatChart() {
     const totalCus = Object.keys(visits).length;
     const back = Object.values(visits).filter(n => n >= 2).length;
     const brandNew = totalCus - back;
-    rows.push({ label: ym.getFullYear() + '/' + String(ym.getMonth()+1).padStart(2,'0'), totalCus, back, brandNew, total: ords.length });
-  }
+    rows.push({ label: monthLabel(ym.getFullYear(), ym.getMonth()), totalCus, back, brandNew, total: ords.length });
+  });
   const tot = Math.max(1, ...rows.map(r => r.totalCus));
   box.innerHTML = `<div class="seg-bars">${rows.map(r => {
     const newW = (r.brandNew / tot * 100).toFixed(1) + '%';
