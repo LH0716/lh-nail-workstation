@@ -2689,6 +2689,7 @@ button:empty:not(.icon-btn):not(.cal-nav-btn):not(.sum-bg-upload):not(.mbac-icon
 .bar-group .bar { flex:1 1 0; max-width:28px; min-width:3px; }
 .bar-group .bar.new { background:linear-gradient(180deg,#8BC8EA,#6AA9D8); }
 .bar-group .bar.ret { background:linear-gradient(180deg,#F4A7B9,#E5859C); }
+.bar-group .bar.old { background:linear-gradient(180deg,#E8B98A,#D99B5E); }
 .bar-group .bar::after { font-size:9px; top:-14px; }
 .ax-pct { display:block; font-size:9px; font-style:normal; font-weight:600; color:var(--accent); margin-top:2px; }
 .bar-xaxis span em.ax-pct { font-style:normal; }
@@ -4139,6 +4140,30 @@ button:not(:empty):not(:has(> *)):not(:has(/* 纯文本但长度为0 */)) {
   background: linear-gradient(180deg, #E49292, #F3C2C2);
 }
 .bar-col .bar:hover { filter: brightness(1.1); transform: translateY(-1px); }
+/* 统计页营收趋势：营收/支出/净利润三柱横排 */
+.bar-col.trio {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+}
+.bar-col.trio .bar {
+  width: 8px;
+  max-width: 8px;
+  min-width: 4px;
+  border-radius: 4px 4px 2px 2px;
+}
+.bar-col.trio .bar.exp {
+  background: linear-gradient(180deg, #E49292, #F3C2C2);
+}
+.bar-col.trio .bar.profit {
+  background: linear-gradient(180deg, #7CC4A4, #A8D8C2);
+}
+/* 月份数据明细弹窗 */
+.ms-subhead { font-size:13px; font-weight:600; color:var(--ink); margin:6px 0 4px; }
+.ms-card { flex:1 1 100px; min-width:90px; padding:10px 12px; border-radius:10px; background:linear-gradient(135deg,#F7FAFE,#fff); border:1px solid var(--rule-2); box-sizing:border-box; }
+.ms-label { font-size:11px; color:var(--muted); }
+.ms-num { font-size:18px; font-weight:700; margin-top:2px; }
 .bar-col .bar-val {
   position: absolute;
   top: -18px;
@@ -4380,16 +4405,13 @@ button:not(:empty):not(:has(> *)):not(:has(/* 纯文本但长度为0 */)) {
 
 /* 回头客分析：分段横条 */
 .seg-bars { display: flex; flex-direction: column; gap: 14px; }
-.seg-row {
-  display: grid;
-  grid-template-columns: 130px 1fr 120px;
-  gap: 14px;
-  align-items: center;
-}
-.seg-label { font-size: 13px; color: var(--ink); font-weight: 500; }
+.seg-row { margin-bottom: 12px; }
+.seg-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
+.seg-label { font-size: 13px; color: var(--ink); font-weight: 500; white-space: nowrap; }
 .seg-track { height: 20px; background: var(--bg3); border-radius: 10px; overflow: hidden; display: flex; }
 .seg-track .s-new  { background: linear-gradient(90deg,#8CC3E3,#5AA9D9); }
 .seg-track .s-back { background: linear-gradient(90deg,#7CC4A4,#54A181); }
+.seg-track .s-old  { background: linear-gradient(90deg,#E8B98A,#D99B5E); }
 .seg-nums { font-size: 12px; color: var(--ink-2); text-align: right; white-space: nowrap; }
 .seg-nums b { color: var(--ink); font-size: 13px; }
 
