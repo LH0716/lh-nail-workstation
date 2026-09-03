@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.96',
+  appVersion: '1.0.97',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -11595,15 +11595,24 @@ function _sbCloseDrawer() {
   document.getElementById('mobileMask')?.remove();
   document.body.classList.remove('sidebar-open');
   document.documentElement.classList.remove('sidebar-open');
+  // 确保不残留滚动锁定，页面始终可滚动可点击
+  document.body.style.overflow = '';
+  document.documentElement.style.overflow = '';
 }
 function _sbOpenDrawer() {
   const el = document.querySelector('.sidebar'); if (!el) return;
+  // 强制关闭所有弹窗 + 清理历史遮罩，确保侧边栏独占顶层
+  // （否则残留 modal 的 z-index(999) 会盖住点击遮罩，导致点主页面无反应、侧边栏收不回）
+  document.querySelectorAll('.modal.show').forEach(m => m.classList.remove('show'));
+  document.body.style.overflow = '';
+  document.documentElement.style.overflow = '';
   document.querySelectorAll('#mobileMask, [id^="_lb"], ._sideMask').forEach(n => n.remove());
   let mask = document.getElementById('mobileMask');
   if (!mask) {
     mask = document.createElement('div');
     mask.id = 'mobileMask';
-    mask.style.cssText = 'position:fixed;inset:0;background:rgba(12,28,46,0.58);z-index:209;';
+    // z-index 提到 99999：确保在所有弹窗(999)之上，点击必达遮罩
+    mask.style.cssText = 'position:fixed;inset:0;background:rgba(12,28,46,0.58);z-index:99999;';
     mask.addEventListener('click', () => _sbCloseDrawer());
     document.body.appendChild(mask);
   }
@@ -11696,6 +11705,19 @@ if (_origNav) {
     if (page === 'monthlyReport') setTimeout(renderMonthlyReport, 50);
   };
 }
+
+// 兜底：移动端点主页面任意区域（非侧边栏、非汉堡按钮）也关闭抽屉，
+// 防止偶发情况下遮罩点击事件丢失导致侧边栏收不回（点击主页面无反应）
+document.addEventListener('click', (e) => {
+  try {
+    if (_sbIsDesktop()) return;
+    const el = document.querySelector('.sidebar');
+    if (!el || !el.classList.contains('mobile-open')) return;
+    if (el.contains(e.target)) return;
+    if (e.target && e.target.closest && e.target.closest('.sidebar-toggle-btn')) return; // 汉堡交给 toggleSidebar
+    _sbCloseDrawer();
+  } catch (_) {}
+}, true);
 
 // 旧版临时浮层提示：不能命名为 toast，避免覆盖上方统一 toast(msg,type,durationMs)
 function floatingToast(msg, ms=1800) {
