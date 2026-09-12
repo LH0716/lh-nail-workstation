@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.99',
+  appVersion: '1.0.100',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -5292,8 +5292,9 @@ function onCompletePayJoinChange() {
     if (cur === 'gold') rate = _getGoldDiscountRate(c.id);
     else if (cur === 'platinum' || cur === 'diamond') rate = getMemberDiscount(cur).discount;
   } else if (join === 'gold') {
-    rate = 0.90;
-    joinLabel = cur === 'gold' ? '🥇 黄金年卡 · 续费（9折）' : '🥇 黄金会员 · 首消9折';
+    // 只有第一次办理黄金会员时首消9折，续费/后续消费一律95折
+    rate = (cur === 'gold') ? 0.95 : 0.90;
+    joinLabel = cur === 'gold' ? '🥇 黄金年卡 · 续费（95折）' : '🥇 黄金会员 · 首消9折';
   } else if (join === 'platinum') {
     rate = 0.90;
     joinLabel = cur === 'platinum' ? '🥈 铂金会员 · 补储值（9折）' : (cur === 'gold' ? '🥈 铂金会员 · 升级（9折）' : '🥈 铂金会员 · 9折');
@@ -5809,22 +5810,26 @@ function getMemberDiscount(level) {
   };
 }
 // 黄金会员动态折扣：首次消费9折，后续消费95折
-// goldSince: 会员成为黄金的起始日期；统计此日期后已完成预约次数
+// 判定依据：该顾客是否已经以黄金会员身份完成过消费。
+// 注意：历史补录的黄金消费（如入档前已在别处消费并补录，预约日期早于 goldSince）也算“已消费”，
+// 不能用 goldSince 日期过滤掉，否则会错误地再次给首次9折。
 function _getGoldDiscountRate(cid) {
   if (!cid) return 0.95;
   const c = customerById(cid);
   if (!c) return 0.95;
   const goldSince = c.goldSince || '';
-  // 统计该顾客在黄金会员期间已完成的预约次数（排除当前正在收款的预约）
+  // 统计该顾客以黄金会员身份已完成过的预约（排除当前正在收款的预约）
   const doneCount = activeRows(State.appointments).filter(a => {
     if (a.status !== 'done') return false;
     const apptCid = a.customerId || (_findCustomerForAppt(a)?.id || '');
     if (apptCid !== cid) return false;
-    if (goldSince) {
-      const apptDate = (a.datetime || '').slice(0, 10);
-      if (apptDate < goldSince) return false;
-    }
-    return true;
+    const apptMember = normalizeMemberLevel(a.member || a.level || '');
+    if (apptMember === 'gold') return true; // 预约明确记录黄金身份
+    if (apptMember) return false; // 预约记录的是其他身份（非会员/铂金/钻石）
+    // 预约未记录会员身份：仅当该预约发生在其黄金期间才算黄金消费
+    if (!goldSince) return false;
+    const apptDate = (a.datetime || '').slice(0, 10);
+    return apptDate >= goldSince;
   }).length;
   // 首次消费9折，后续95折
   return doneCount === 0 ? 0.90 : 0.95;
