@@ -14,7 +14,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/icons/icon-192.svg">
 <link rel="apple-touch-icon" href="assets/icons/icon-192.svg">
 <title>LH Nail 美甲工作台</title>
-<link rel="stylesheet" href="assets/css/style.css?v=1.0.102">
+<link rel="stylesheet" href="assets/css/style.css?v=1.0.103">
 </head>
 <body>
 
@@ -829,12 +829,12 @@
       <div class="section-head">
         <h2 class="section-title">📊 新客 · 回头客 · 老顾客结构分析</h2>
         <div class="head-actions">
-          <span class="struct-legend"><span class="lg-dot" style="background:#9ED6B7;"></span>新客（累计1次）</span>
-          <span class="struct-legend"><span class="lg-dot" style="background:#F0CB8B;"></span>回头客（累计2次）</span>
+          <span class="struct-legend"><span class="lg-dot" style="background:#9ED6B7;"></span>新客（首次到店）</span>
+          <span class="struct-legend"><span class="lg-dot" style="background:#F0CB8B;"></span>回头客（第2次到店）</span>
           <span class="struct-legend"><span class="lg-dot" style="background:#8BC8EA;"></span>老顾客（累计≥3次）</span>
         </div>
       </div>
-      <div class="section-desc" style="color:var(--muted);font-size:12px;line-height:1.7;">按截至该期期末的累计预约次数：新客 = 该期到店 且 截至期末累计 1 次；回头客 = 该期到店 且 截至期末累计恰好 2 次；老顾客 = 该期到店 且 截至期末累计≥ 3 次（老顾客由回头客升级而来）。回头客占比 = 该期到店且截至期末累计预约≥2 的顾客 ÷ 该期到店顾客。</div>
+      <div class="section-desc" style="color:var(--muted);font-size:12px;line-height:1.7;">新客 = 该期完成第 1 次到店（首次到店）；回头客 = 该期完成第 2 次到店（即使当月继续到店升级成老顾客，第 2 次也计入回头客）；老顾客 = 该期到店 且 截至该期期末累计预约≥ 3 次（老顾客由回头客升级而来）。同一顾客同月可同时计入新客/回头客/老顾客（如当月多次到店依次成为新客→回头客→老顾客）。回头客占比 = 该期到店且累计预约≥2 的顾客 ÷ 该期到店顾客。</div>
       <!-- 汇总卡：当月 / 当年 / 最多年份 / 最多月份 -->
       <div class="struct-summary">
         <div class="ss-card">
@@ -2729,9 +2729,9 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<script src="assets/js/supabase.min.js?v=1.0.102" charset="UTF-8"></script>
-<script src="assets/js/supabase-config.js?v=1.0.102" charset="UTF-8"></script>
-<script src="assets/js/app.js?v=1.0.102" charset="UTF-8"></script>
+<script src="assets/js/supabase.min.js?v=1.0.103" charset="UTF-8"></script>
+<script src="assets/js/supabase-config.js?v=1.0.103" charset="UTF-8"></script>
+<script src="assets/js/app.js?v=1.0.103" charset="UTF-8"></script>
 <!-- 🛡️ 后置保护：app.js 加载后立即检查并强制禁用旧版 purge 函数 -->
 </body>
 </html>
