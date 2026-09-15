@@ -2667,6 +2667,9 @@ button:empty:not(.icon-btn):not(.cal-nav-btn):not(.sum-bg-upload):not(.mbac-icon
 .bar-chart .bar.ret {
   background: linear-gradient(180deg, #7BA17C, #A8C5A9);
 }
+.bar-chart .bar.old {
+  background: linear-gradient(180deg, #5A9FD4, #3E7CB8);
+}
 .bar-xaxis {
   display: flex;
   justify-content: space-between;
@@ -2695,7 +2698,7 @@ button:empty:not(.icon-btn):not(.cal-nav-btn):not(.sum-bg-upload):not(.mbac-icon
 .bar-group .bar { flex:1 1 0; max-width:28px; min-width:3px; }
 .bar-group .bar.new { background:linear-gradient(180deg,#9ED6B7,#7CC4A4); }
 .bar-group .bar.ret { background:linear-gradient(180deg,#F0CB8B,#E7B866); }
-.bar-group .bar.old { background:linear-gradient(180deg,#8BC8EA,#6AA9D8); }
+.bar-group .bar.old { background:linear-gradient(180deg,#5A9FD4,#3E7CB8); }
 .bar-group .bar::after { font-size:9px; top:-14px; }
 .ax-pct { display:block; font-size:9px; font-style:normal; font-weight:600; color:var(--accent); margin-top:2px; }
 .bar-xaxis span em.ax-pct { font-style:normal; }
@@ -4995,6 +4998,9 @@ button:not(.modal-close):not(.lightbox-close):not(.di-del):not(.cal-nav-btn):not
 .cms-card.ret-total .cms-value { color: #A9823E; }
 .cms-card.ret-avg   .cms-value { color: #8F82C7; }
 .cms-card.ret-top   .cms-value { color: #E49292; }
+.cms-card.old-total .cms-value { color: #3E6E9E; }
+.cms-card.old-avg   .cms-value { color: #6AA9D8; }
+.cms-card.old-top   .cms-value { color: #8F82C7; }
 
 /* 柱图：数值显示在柱子顶端 */
 #page-customers .bar-chart-wrap {
@@ -5007,12 +5013,12 @@ button:not(.modal-close):not(.lightbox-close):not(.di-del):not(.cal-nav-btn):not
 #page-customers .bar-chart .bar::after {
   content: attr(data-count);
   position: absolute;
-  top: -18px;
+  top: -20px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  color: var(--ink-2);
+  color: var(--ink);
   white-space: nowrap;
   font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
