@@ -2693,12 +2693,30 @@ button:empty:not(.icon-btn):not(.cal-nav-btn):not(.sum-bg-upload):not(.mbac-icon
 .struct-subhead .filter-select { margin-left:auto; }
 .bar-group { flex:1; min-width:0; display:flex; align-items:flex-end; gap:3px; justify-content:center; }
 .bar-group .bar { flex:1 1 0; max-width:28px; min-width:3px; }
-.bar-group .bar.new { background:linear-gradient(180deg,#8BC8EA,#6AA9D8); }
-.bar-group .bar.ret { background:linear-gradient(180deg,#F4A7B9,#E5859C); }
-.bar-group .bar.old { background:linear-gradient(180deg,#E8B98A,#D99B5E); }
+.bar-group .bar.new { background:linear-gradient(180deg,#9ED6B7,#7CC4A4); }
+.bar-group .bar.ret { background:linear-gradient(180deg,#F0CB8B,#E7B866); }
+.bar-group .bar.old { background:linear-gradient(180deg,#8BC8EA,#6AA9D8); }
 .bar-group .bar::after { font-size:9px; top:-14px; }
 .ax-pct { display:block; font-size:9px; font-style:normal; font-weight:600; color:var(--accent); margin-top:2px; }
 .bar-xaxis span em.ax-pct { font-style:normal; }
+
+/* 逐月对比：12 个月横向滚动，避免柱组挤在一起看不清 */
+.bar-chart-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.bar-chart-scroll .bar-chart {
+  min-width: 1068px; /* 12 组 × 89px（组 79px + 间距 10px） */
+  justify-content: flex-start;
+}
+.bar-chart-scroll .bar-group {
+  flex: 0 0 79px;
+  min-width: 79px;
+}
+.bar-chart-scroll .bar-xaxis {
+  min-width: 1068px;
+}
 
 /* 老顾客排行 - 排名徽章 */
 .rank-badge {
@@ -4158,6 +4176,8 @@ button:not(:empty):not(:has(> *)):not(:has(/* 纯文本但长度为0 */)) {
   max-width: 8px;
   min-width: 4px;
   border-radius: 4px 4px 2px 2px;
+  flex-grow: 0;
+  flex-basis: auto;
 }
 .bar-col.trio .bar.exp {
   background: linear-gradient(180deg, #E49292, #F3C2C2);
@@ -4276,6 +4296,8 @@ button:not(:empty):not(:has(> *)):not(:has(/* 纯文本但长度为0 */)) {
   transition: all .3s;
   position: relative;
   flex-shrink: 0;
+  flex-grow: 0;
+  flex-basis: auto;
   box-shadow: 0 -2px 8px rgba(90,169,217,0.12) inset;
 }
 .bar-col .bar:hover {
@@ -4415,9 +4437,9 @@ button:not(:empty):not(:has(> *)):not(:has(/* 纯文本但长度为0 */)) {
 .seg-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
 .seg-label { font-size: 13px; color: var(--ink); font-weight: 500; white-space: nowrap; }
 .seg-track { height: 20px; background: var(--bg3); border-radius: 10px; overflow: hidden; display: flex; }
-.seg-track .s-new  { background: linear-gradient(90deg,#8CC3E3,#5AA9D9); }
-.seg-track .s-back { background: linear-gradient(90deg,#7CC4A4,#54A181); }
-.seg-track .s-old  { background: linear-gradient(90deg,#E8B98A,#D99B5E); }
+.seg-track .s-new  { background: linear-gradient(90deg,#9ED6B7,#7CC4A4); }
+.seg-track .s-back { background: linear-gradient(90deg,#F0CB8B,#E7B866); }
+.seg-track .s-old  { background: linear-gradient(90deg,#8BC8EA,#6AA9D8); }
 .seg-nums { font-size: 12px; color: var(--ink-2); text-align: right; white-space: nowrap; }
 .seg-nums b { color: var(--ink); font-size: 13px; }
 
@@ -4534,8 +4556,8 @@ button:not(:empty):not(:has(> *)):not(:has(/* 纯文本但长度为0 */)) {
   /* 分布横条：三栏变两栏（标签 + 条 + 金额） */
   .dist-row { grid-template-columns: 96px 1fr 68px; gap: 8px; }
   .dist-amount { font-size: 12px; }
-  /* 月趋势柱图：柱值太挤隐藏 */
-  .bar-col .bar-val { display: none; }
+  /* 月趋势柱图：柱值缩小字号显示（柱顶数字） */
+  .bar-col .bar-val { font-size: 9px; top: -15px; }
   .bar-chart { height: 170px; }
   /* 月历：缩小行高 */
   .cal-month-grid { grid-auto-rows: 110px; }
