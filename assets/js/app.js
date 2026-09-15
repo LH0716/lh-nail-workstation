@@ -5944,39 +5944,61 @@ function _customerSecondMonth(c) {
   return dates.length >= 2 ? dates[1].slice(0, 7) : null;
 }
 
+// 截至某月末（YYYY-MM，含该月）的累计完成预约到店次数
+// 用户口径：老顾客 = 截至该月末累计 ≥3 次；回头客 = 截至该月末累计恰好 2 次
+function _cumVisitsBy(c, ym) {
+  let n = 0;
+  const cn = _normStr(c.name || '');
+  activeRows(State.appointments).forEach(a => {
+    if (a._deleted || normalizeApptStatus(a.status) !== 'done') return;
+    const matched = a.customerId === c.id || (cn && _normStr(a.customer || '') === cn);
+    if (!matched) return;
+    const d = String(a.datetime || a.date || '');
+    if (d.slice(0, 7) <= ym) n++;
+  });
+  return n;
+}
+
 /* 某期（YYYY 或 YYYY-MM）的 新客 / 回头客 / 老顾客 人数
    口径（用户定义）：
    - 新客   = 该期完成第 1 次预约（首次到店月归期；动态，含此后继续预约者）
    - 回头客 = 该期完成第 2 次预约（按第 2 次到店月归期；里程碑，含此后升级成老顾客的）
    - 老顾客 = 该期有到店 且 当前累计预约 ≥3 次（老顾客由回头客升级而来，老顾客包含回头客） */
+function _curYm() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+
 function _custSplit(prefix) {
   let ret = 0, nw = 0, old = 0;
   const isYear = prefix.indexOf('-') < 0;
+  // 截至该期期末的累计预约次数：年度取当前月（历史年份取 12 月末），月度取该月末
+  const endYm = isYear
+    ? (prefix === String(new Date().getFullYear()) ? _curYm() : prefix + '-12')
+    : prefix;
   activeRows(State.customers).forEach(c => {
-    const all = _customerRealStats(c, '');
-    if (all.visits === 0) return;
     if (_customerRealStats(c, prefix).visits === 0) return; // 该期未到店
-    const fm = String(all.first || c.firstVisit || '').slice(0, isYear ? 4 : 7);
-    const sm = _customerSecondMonth(c) || '';
-    // 新客 = 该期完成第 1 次预约（首次月归期）
-    if (fm.slice(0, prefix.length) === prefix) nw++;
-    // 回头客 = 该期完成第 2 次预约（第 2 次到店月归期）
-    if (sm.slice(0, prefix.length) === prefix) ret++;
-    // 老顾客 = 该期有到店 且 当前累计 ≥3 次
-    if (all.visits >= 3) old++;
+    const n = _cumVisitsBy(c, endYm);
+    if (n >= 3) old++;       // 老顾客 = 截至期末累计≥3次
+    else if (n === 2) ret++; // 回头客 = 截至期末累计恰好2次
+    else nw++;               // 新客 = 截至期末累计1次
   });
   return { ret, nw, old };
 }
 
 /* 该期到店顾客中 广义回头客（累计预约≥2）占比 —— 与统计板块回头客率同口径 */
 function _retRateOfPrefix(prefix) {
+  // 广义回头客率 = 该期到店且截至期末累计预约≥2 的顾客 ÷ 该期到店顾客（回头客+老顾客）
   let vst = 0, back = 0;
+  const isYear = prefix.indexOf('-') < 0;
+  const endYm = isYear
+    ? (prefix === String(new Date().getFullYear()) ? _curYm() : prefix + '-12')
+    : prefix;
   activeRows(State.customers).forEach(c => {
-    const all = _customerRealStats(c, '');
-    if (all.visits === 0) return;
     if (_customerRealStats(c, prefix).visits === 0) return;
     vst++;
-    if (all.visits >= 2) back++;
+    if (_cumVisitsBy(c, endYm) >= 2) back++;
   });
   return vst > 0 ? Math.round(back / vst * 100) : 0;
 }
@@ -6276,7 +6298,7 @@ function initYearSelectors() {
     if (c.lastVisit) years.add(new Date(c.lastVisit).getFullYear());
   });
   const arr = Array.from(years).sort((a,b)=>b-a);
-  ['newCustYearSel','retCustYearSel'].forEach(id => {
+  ['newCustYearSel','retCustYearSel','oldCustYearSel'].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
     sel.innerHTML = arr.map(y => `<option value="${y}" ${y===now.getFullYear()?'selected':''}>${y} 年</option>`).join('');
@@ -6343,11 +6365,20 @@ function renderRetCustChart() {
   const sel = document.getElementById('retCustYearSel'); if (!sel) return;
   const y = +sel.value;
   const counts = Array(12).fill(0);
-  // 每月回头客 = 该月完成第 2 次到店（里程碑：不管此后是否升级成老顾客）
+  // 每月回头客 = 该月有到店 且 截至该月末累计预约恰好 2 次（当月回头客，升级成老顾客的不计）
   activeRows(State.customers).forEach(c => {
-    const m = _customerSecondMonth(c);
-    if (!m) return;
-    if (Number(m.slice(0, 4)) === y) counts[Number(m.slice(5, 7)) - 1]++;
+    const cn = _normStr(c.name || '');
+    const ymSeen = new Set();
+    activeRows(State.appointments).forEach(a => {
+      if (a._deleted || normalizeApptStatus(a.status) !== 'done') return;
+      const matched = a.customerId === c.id || (cn && _normStr(a.customer || '') === cn);
+      if (!matched) return;
+      const d = String(a.datetime || a.date || '');
+      if (d.slice(0, 4) === String(y)) ymSeen.add(d.slice(0, 7));
+    });
+    ymSeen.forEach(ym => {
+      if (_cumVisitsBy(c, ym) === 2) counts[Number(ym.slice(5, 7)) - 1]++;
+    });
   });
   // ---- 3 张迷你汇总卡 ----
   const total = counts.reduce((s,n)=>s+n,0); // 年度回头客总数（每顾客第 2 次只计一次，天然去重）
@@ -6358,10 +6389,20 @@ function renderRetCustChart() {
   let topIdx = 0, topV = counts[0];
   counts.forEach((v,i)=>{ if (v > topV) { topV = v; topIdx = i; }});
   // 同比上一年
-  const prevCounts = _getPrevYearCounts(y, (c, py) => {
-    const m2 = _customerSecondMonth(c);
-    if (!m2) return null;
-    return Number(m2.slice(0, 4)) === py ? Number(m2.slice(5, 7)) - 1 : null;
+  const prevCounts = Array(12).fill(0);
+  activeRows(State.customers).forEach(c => {
+    const cn = _normStr(c.name || '');
+    const ymSeen = new Set();
+    activeRows(State.appointments).forEach(a => {
+      if (a._deleted || normalizeApptStatus(a.status) !== 'done') return;
+      const matched = a.customerId === c.id || (cn && _normStr(a.customer || '') === cn);
+      if (!matched) return;
+      const d = String(a.datetime || a.date || '');
+      if (d.slice(0, 4) === String(y - 1)) ymSeen.add(d.slice(0, 7));
+    });
+    ymSeen.forEach(ym => {
+      if (_cumVisitsBy(c, ym) === 2) prevCounts[Number(ym.slice(5, 7)) - 1]++;
+    });
   });
   const prevTotal = prevCounts.reduce((s,n)=>s+n,0);
   const diff = total - prevTotal;
@@ -6378,15 +6419,77 @@ function renderRetCustChart() {
 
   renderBars('retCustChart', counts, true, y, 'ret');
 }
+function renderOldCustChart() {
+  const sel = document.getElementById('oldCustYearSel'); if (!sel) return;
+  const y = +sel.value;
+  const counts = Array(12).fill(0);
+  let total = 0;
+  // 每月老顾客 = 该月有到店 且 截至该月末累计预约≥3 次的顾客（每顾客每月只计 1 人）
+  activeRows(State.customers).forEach(c => {
+    const cn = _normStr(c.name || '');
+    const ymSeen = new Set();
+    activeRows(State.appointments).forEach(a => {
+      if (a._deleted || normalizeApptStatus(a.status) !== 'done') return;
+      const matched = a.customerId === c.id || (cn && _normStr(a.customer || '') === cn);
+      if (!matched) return;
+      const d = String(a.datetime || a.date || '');
+      if (d.slice(0, 4) === String(y)) ymSeen.add(d.slice(0, 7));
+    });
+    let any = false;
+    ymSeen.forEach(ym => {
+      if (_cumVisitsBy(c, ym) >= 3) { counts[Number(ym.slice(5, 7)) - 1]++; any = true; }
+    });
+    if (any) total++; // 年度老顾客总数（去重：该年到店过且截至该月末累计≥3次的顾客）
+  });
+  // ---- 3 张迷你汇总卡 ----
+  const now = new Date();
+  const curMonth = (now.getFullYear() === y) ? now.getMonth() : 11;
+  const denom = Math.max(Math.min(curMonth + 1, 12), 1);
+  const avg = (total / denom);
+  let topIdx = 0, topV = counts[0] || 0;
+  counts.forEach((v, i) => { if (v > topV) { topV = v; topIdx = i; } });
+  // 同比上一年（口径一致：上年该月有到店 且 截至该月末累计≥3 次）
+  const prevCounts = Array(12).fill(0);
+  let prevTotal = 0;
+  activeRows(State.customers).forEach(c => {
+    const cn = _normStr(c.name || '');
+    const ymSeen = new Set();
+    activeRows(State.appointments).forEach(a => {
+      if (a._deleted || normalizeApptStatus(a.status) !== 'done') return;
+      const matched = a.customerId === c.id || (cn && _normStr(a.customer || '') === cn);
+      if (!matched) return;
+      const d = String(a.datetime || a.date || '');
+      if (d.slice(0, 4) === String(y - 1)) ymSeen.add(d.slice(0, 7));
+    });
+    let any = false;
+    ymSeen.forEach(ym => {
+      if (_cumVisitsBy(c, ym) >= 3) { prevCounts[Number(ym.slice(5, 7)) - 1]++; any = true; }
+    });
+    if (any) prevTotal++;
+  });
+  const diff = total - prevTotal;
+  const ratio = prevTotal > 0 ? Math.round(diff / prevTotal * 100) : (total > 0 ? 100 : 0);
+  const trend = diff === 0 ? '持平'
+    : (diff > 0 ? `↑ 同比 +${ratio}%（多${diff}人）` : `↓ 同比 ${ratio}%（少${-diff}人）`);
+
+  const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setTxt('ocTotal', total + ' 人');
+  setTxt('ocTotalSub', prevTotal > 0 || total > 0 ? trend : '上一年无数据');
+  setTxt('ocAvg', avg.toFixed(1) + ' 人');
+  setTxt('ocTop', (topIdx + 1) + ' 月');
+  setTxt('ocTopSub', '老顾客到店 ' + topV + ' 人');
+
+  renderBars('oldCustChart', counts, true, y, 'old');
+}
 function renderBars(containerId, counts, isRet, year, type) {
   const el = document.getElementById(containerId); if (!el) return;
   const max = Math.max.apply(null, counts.concat([1]));
   el.innerHTML = counts.map((c, i) => {
     const h = Math.max((c / max) * 100, c > 0 ? 4 : 0);
     const m = i + 1;
-    const cls = isRet ? 'ret' : '';
+    const cls = type === 'ret' ? 'ret' : (type === 'old' ? 'old' : '');
     const clickable = c > 0 ? ` clickable-bar" data-y="${year}" data-m="${m}" onclick="openMonthCustDetail('${type}',${year},${m})" title="点击查看 ${year} 年 ${m} 月${isRet?'回头客':'新增顾客'}明细"` : '';
-    return `<div class="bar ${cls}${clickable}" style="height:${h}%" data-count="${c}人"></div>`;
+    return `<div class="bar ${cls}${clickable}" style="height:${h}%" data-count="${c > 0 ? c + '人' : ''}"></div>`;
   }).join('');
 }
 
@@ -6394,7 +6497,8 @@ function renderBars(containerId, counts, isRet, year, type) {
 function openMonthCustDetail(type, year, month) {
   const ym = year + '-' + String(month).padStart(2, '0');
   const isNew = type === 'new';
-  const typeLabel = isNew ? '新增顾客' : '回头客';
+  const isOld = type === 'old';
+  const typeLabel = isNew ? '新增顾客' : (isOld ? '老顾客' : '回头客');
   const rows = [];
   let totalAmt = 0;
   const custNames = new Set();
@@ -6403,9 +6507,12 @@ function openMonthCustDetail(type, year, month) {
     const f = String(all.first || c.firstVisit || '').slice(0, 7);
     if (isNew) {
       if (f !== ym) return;
+    } else if (isOld) {
+      // 老顾客 = 该月有到店 且 截至该月末累计预约 ≥3 次
+      if (_cumVisitsBy(c, ym) < 3) return;
     } else {
-      // 回头客 = 第 2 次到店在该月（里程碑：不管此后是否升级成老顾客）
-      if (_customerSecondMonth(c) !== ym) return;
+      // 回头客 = 该月有到店 且 截至该月末累计预约恰好 2 次
+      if (_cumVisitsBy(c, ym) !== 2) return;
     }
     const cn = _normStr(c.name || '');
     const appts = activeRows(State.appointments).filter(a => {
@@ -6856,6 +6963,7 @@ function refreshAllCustomerViews() {
   try { initYearSelectors(); } catch(e) {}
   try { renderNewCustChart(); } catch(e) {}
   try { renderRetCustChart(); } catch(e) {}
+  try { renderOldCustChart(); } catch(e) {}
   try { initVisitRankSelect(); } catch(e) {}
   try { renderVisitRank(); } catch(e) {}
   try { renderCustStructure(); } catch(e) {}
@@ -8440,6 +8548,7 @@ window.switchPage = function(page) {
     initYearSelectors();
     renderNewCustChart();
     renderRetCustChart();
+    renderOldCustChart();
     initVisitRankSelect();
     renderVisitRank();
     renderCustStructure();
@@ -11435,9 +11544,9 @@ function renderRepeatChart(year) {
     </div>`;
   }).join('')}
   <div style="display:flex;gap:16px;font-size:12px;color:var(--ink-2);margin-top:6px;flex-wrap:wrap;">
-    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#9ED6B7,#7CC4A4);border-radius:2px;margin-right:6px;"></i>新客（第1次）</span>
-    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#F0CB8B,#E7B866);border-radius:2px;margin-right:6px;"></i>回头客（第2次）</span>
-    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#8BC8EA,#6AA9D8);border-radius:2px;margin-right:6px;"></i>老顾客（≥3次）</span>
+    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#9ED6B7,#7CC4A4);border-radius:2px;margin-right:6px;"></i>新客（累计1次）</span>
+    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#F0CB8B,#E7B866);border-radius:2px;margin-right:6px;"></i>回头客（累计2次）</span>
+    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#8BC8EA,#6AA9D8);border-radius:2px;margin-right:6px;"></i>老顾客（累计≥3次）</span>
   </div>
   </div>`;
 }
