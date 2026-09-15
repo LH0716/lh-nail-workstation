@@ -17,7 +17,7 @@ try {
 
 // ============ 全局状态 ============
 const State = {
-  appVersion: '1.0.100',
+  appVersion: '1.0.101',
   // 版本戳（跨设备同步用）
   __ver: { schema: 2, data: 0, ts: 0 },
   // 业务类型 nail/lash
@@ -6461,13 +6461,21 @@ function closeMonthCustDetail() {
 
 function renderVisitRank() {
   const body = document.getElementById('visitRankBody'); if (!body) return;
-  const range = document.getElementById('visitRankRange')?.value || 'all';
+  const rangeKey = document.getElementById('visitRankRange')?.value || 'month';
+  const vMSel = document.getElementById('visitRankMonth');
+  const vMVal = vMSel ? vMSel.value : '';
+  const vYSel = document.getElementById('visitRankYearSel');
+  const vYVal = vYSel ? vYSel.value : '';
   const now = new Date();
+  let prefix = '';
+  if (rangeKey === 'monthSel' && vMVal) prefix = vMVal; // 指定月份
+  else if (vYVal) prefix = vYVal; // 指定年份
+  else if (rangeKey === 'month') prefix = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  else if (rangeKey === 'lastMonth') { const d = new Date(now.getFullYear(), now.getMonth() - 1, 1); prefix = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+  else if (rangeKey === 'year') prefix = String(now.getFullYear());
   const list = activeRows(State.customers)
     .map(c => {
-      let st = _customerRealStats(c, '');
-      if (range === 'month') st = _customerRealStats(c, now.toISOString().slice(0,7));
-      else if (/^\d{4}$/.test(range)) st = _customerRealStats(c, range);
+      const st = _customerRealStats(c, prefix);
       return { ...c, _v: st.visits, _p: st.paid, _l: st.last || c.lastVisit };
     })
     .filter(c => c._v > 0)
@@ -6537,11 +6545,9 @@ function renderCustomerList() {
 
 /* ---- 老顾客排行：年份选择器（全部时间 / 近一月 / 每一年） ---- */
 function initVisitRankSelect() {
-  const sel = document.getElementById('visitRankRange'); if (!sel) return;
+  const sel = document.getElementById('visitRankYearSel'); if (!sel) return;
   const cur = sel.value;
-  const years = _structYears();
-  const base = '<option value="all">全部时间</option><option value="month">近一月</option>';
-  sel.innerHTML = base + years.map(y => `<option value="${y}">${y} 年</option>`).join('');
+  sel.innerHTML = '<option value="">全部年份</option>' + _structYears().map(y => `<option value="${y}">${y} 年</option>`).join('');
   if (cur && Array.from(sel.options).some(o => o.value === cur)) sel.value = cur;
 }
 
@@ -8748,9 +8754,32 @@ function setIncomeTodayView() {
 // -------- 收入：渲染 --------
 function renderIncome() {
   const rangeKey = document.getElementById('incRange')?.value || 'month';
+  // 🔄 数据永存：填充收入年份选择器（全部年份/各年份）
+  try {
+    const yrsSet = new Set();
+    buildIncomeRecords().forEach(r => { const y = String(r.datetime || r.date || '').slice(0, 4); if (/^\d{4}$/.test(y)) yrsSet.add(y); });
+    const yrs = Array.from(yrsSet).sort().reverse();
+    const iYSel = document.getElementById('incYearSel');
+    if (iYSel) {
+      const prevV = iYSel.value;
+      iYSel.innerHTML = '<option value="">全部年份</option>' + yrs.map(y => `<option value="${y}">${y} 年</option>`).join('');
+      iYSel.value = yrs.includes(prevV) ? prevV : '';
+    }
+  } catch(e){}
+  const incYSel = document.getElementById('incYearSel');
+  const incYVal = incYSel ? incYSel.value : '';
+  const incMSel = document.getElementById('incMonthSel');
+  const incMVal = incMSel ? incMSel.value : '';
   const cr = window._incCustomRange;
   let range;
-  if (cr && cr.month) {
+  if (rangeKey === 'monthSel' && incMVal) {
+    // 指定月份：range = 该自然月
+    const y = +incMVal.slice(0, 4), m = +incMVal.slice(5, 7);
+    range = [new Date(y, m - 1, 1), new Date(y, m, 0, 23, 59, 59, 999)];
+  } else if (incYVal) {
+    const y = +incYVal;
+    range = [new Date(y, 0, 1), new Date(y, 11, 31, 23, 59, 59, 999)];
+  } else if (cr && cr.month) {
     const y = +cr.month.slice(0,4), m = +cr.month.slice(5,7);
     range = [new Date(y, m-1, 1), new Date(y, m, 0, 23, 59, 59, 999)];
   } else if (cr && cr.year) {
@@ -9278,8 +9307,14 @@ function renderExpense() {
   // 🔄 数据永存：支持按具体年份查看历史每年支出
   const exYSel = document.getElementById('expYearSel');
   const exYVal = exYSel ? exYSel.value : '';
+  const exMSel = document.getElementById('expMonthSel');
+  const exMVal = exMSel ? exMSel.value : '';
   let range;
-  if (exYVal) {
+  if (rangeKey === 'monthSel' && exMVal) {
+    // 指定月份：range = 该自然月
+    const y = +exMVal.slice(0, 4), m = +exMVal.slice(5, 7);
+    range = [new Date(y, m - 1, 1), new Date(y, m, 0, 23, 59, 59, 999)];
+  } else if (exYVal) {
     const y = +exYVal;
     range = [new Date(y, 0, 1), new Date(y, 11, 31, 23, 59, 59, 999)];
   } else {
@@ -9308,9 +9343,11 @@ function renderExpense() {
   const op     = all.filter(r => EXP_CAT_META[r.category]?.op).reduce((s,r) => s + Number(r.amount||0), 0);
 
   // 利润 = 同时间范围的营业总收入(bizRevenue+manual) - 总支出
-  const incRange = exYVal
-    ? [new Date(+exYVal, 0, 1), new Date(+exYVal, 11, 31, 23, 59, 59, 999)]
-    : getRange(rangeKey);
+  const incRange = (rangeKey === 'monthSel' && exMVal)
+    ? [new Date(+exMVal.slice(0, 4), +exMVal.slice(5, 7) - 1, 1), new Date(+exMVal.slice(0, 4), +exMVal.slice(5, 7), 0, 23, 59, 59, 999)]
+    : (exYVal
+        ? [new Date(+exYVal, 0, 1), new Date(+exYVal, 11, 31, 23, 59, 59, 999)]
+        : getRange(rangeKey));
   const incBiz = buildIncomeRecords().filter(r => inRange(r.datetime, incRange) && (r.bizRevenue || r.manual))
     .reduce((s,r) => s + Number(r.amount||0), 0);
   const profit = incBiz - total;
@@ -9347,8 +9384,11 @@ function renderExpense() {
     const y = new Date().getFullYear();
     const monthAmts = Array(12).fill(0);
     buildExpenseRecords().forEach(r => {
-      const dt = new Date(r.date);
-      if (dt.getFullYear() === y) monthAmts[dt.getMonth()] += Number(r.amount||0);
+      const dp = String(r.date || '').split('-');
+      if (dp.length >= 2) {
+        const yy = +dp[0], mm = +dp[1] - 1;
+        if (yy === y) monthAmts[mm] += Number(r.amount || 0);
+      }
     });
     const max = Math.max(...monthAmts, 1);
     yBar.innerHTML = monthAmts.map(v => `<span style="height:${Math.max(6, Math.round(v/max*100))}%;"></span>`).join('');
@@ -9372,20 +9412,24 @@ function renderExpense() {
         </div>`).join('') + `</div>`;
     }
   }
-  // 月趋势：支出柱（粉色）
+  // 月趋势：支出柱（粉色），点击柱子查看该月支出明细
   const tE = document.getElementById('expTrendChart');
   if (tE) {
-    const y = new Date().getFullYear(); const curM = new Date().getMonth();
+    const nowY = new Date().getFullYear(); const curM = new Date().getMonth();
+    const trendY = exYVal ? +exYVal : nowY; // 趋势图跟随所选年份，未选则本年
     const monthAmts = Array(12).fill(0);
     buildExpenseRecords().forEach(r => {
-      const dt = new Date(r.date);
-      if (dt.getFullYear() === y) monthAmts[dt.getMonth()] += Number(r.amount||0);
+      const dp = String(r.date || '').split('-');
+      if (dp.length >= 2) {
+        const yy = +dp[0], mm = +dp[1] - 1;
+        if (yy === trendY) monthAmts[mm] += Number(r.amount || 0);
+      }
     });
     const maxA = Math.max(...monthAmts, 1);
     tE.innerHTML = `<div class="bar-chart">` + monthAmts.map((v, i) => `
-      <div class="bar-col ${i===curM?'current':''}">
+      <div class="bar-col ${(trendY===nowY && i===curM)?'current':''}" title="点击查看 ${trendY} 年 ${i+1} 月支出明细" onclick="openExpMonthDetail('${trendY}-${String(i+1).padStart(2,'0')}')">
         <div class="bar exp-bar" style="height:${Math.max(2, Math.round(v/maxA*100))}%;">
-          ${v > 0 ? `<div class="bar-val">${Math.round(v)}</div>` : ''}
+          ${v > 0 ? `<div class="bar-val">¥${Math.round(v)}</div>` : ''}
         </div>
         <div class="bar-mon">${i+1}月</div>
       </div>`).join('') + `</div>`;
@@ -10886,6 +10930,48 @@ function toggleStMonth() {
     ms.style.display = 'none';
   }
 }
+function toggleIncMonth() {
+  const sel = document.getElementById('incRange');
+  const ms = document.getElementById('incMonthSel');
+  if (!ms) return;
+  if (sel && sel.value === 'monthSel') {
+    if (!ms.value) {
+      const d = new Date();
+      ms.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+    ms.style.display = '';
+  } else {
+    ms.style.display = 'none';
+  }
+}
+function toggleExpMonth() {
+  const sel = document.getElementById('expRange');
+  const ms = document.getElementById('expMonthSel');
+  if (!ms) return;
+  if (sel && sel.value === 'monthSel') {
+    if (!ms.value) {
+      const d = new Date();
+      ms.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+    ms.style.display = '';
+  } else {
+    ms.style.display = 'none';
+  }
+}
+function toggleVisitMonth() {
+  const sel = document.getElementById('visitRankRange');
+  const ms = document.getElementById('visitRankMonth');
+  if (!ms) return;
+  if (sel && sel.value === 'monthSel') {
+    if (!ms.value) {
+      const d = new Date();
+      ms.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+    ms.style.display = '';
+  } else {
+    ms.style.display = 'none';
+  }
+}
 function renderStats() {
   toggleStMonth();
   const rangeKey = document.getElementById('stRange')?.value || 'month';
@@ -11135,7 +11221,9 @@ function openMonthStats(year, month) {
     return t >= s && t <= e;
   });
   const expAll = activeRows(State.expenses).filter(x => {
-    const t = new Date(x.date).getTime();
+    const dp = String(x.date || '').split('-');
+    if (dp.length < 2) return false;
+    const t = new Date(+dp[0], +dp[1] - 1, 1).getTime();
     return t >= s && t <= e;
   });
   const rev = incAll.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
@@ -11181,6 +11269,45 @@ function openMonthStats(year, month) {
 }
 function closeMonthStats() {
   document.getElementById('monthStatsModal')?.classList.remove('show');
+}
+
+/* ---- 支出月明细弹窗（点击支出趋势图某月柱） ---- */
+function openExpMonthDetail(ym) {
+  const y = +ym.slice(0, 4), m = +ym.slice(5, 7);
+  const expAll = activeRows(State.expenses)
+    .filter(x => {
+      const dp = String(x.date || '').split('-');
+      return dp.length >= 2 && +dp[0] === y && +dp[1] === m;
+    })
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const exp = expAll.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  const title = document.getElementById('expMTitle');
+  if (title) title.textContent = `${y} 年 ${m} 月 支出明细`;
+  const sum = document.getElementById('expMSummary');
+  if (sum) {
+    sum.innerHTML = `
+      <div class="ms-card"><div class="ms-label">本月支出</div><div class="ms-num" style="color:#D05A5A;">${fmtMoney(exp)}</div></div>
+      <div class="ms-card"><div class="ms-label">支出笔数</div><div class="ms-num">${expAll.length} 笔</div></div>`;
+  }
+  const tb = document.getElementById('expMBody');
+  if (tb) {
+    if (!expAll.length) tb.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px;">本月暂无支出记录</td></tr>`;
+    else tb.innerHTML = expAll.map(x => {
+      const meta = EXP_CAT_META[x.category] || { label: x.category || x.type || '-', cls: 'other' };
+      return `<tr>
+        <td>${escapeHtml(String(x.date || '').slice(0, 10))}</td>
+        <td><span class="tag-exp ${meta.cls || 'other'}">${escapeHtml(meta.label)}</span></td>
+        <td>${escapeHtml(x.supplier || '-')}</td>
+        <td>${escapeHtml(x.remark || x.note || '-')}</td>
+        <td style="font-weight:700;color:#D05A5A;">${fmtMoney(x.amount)}</td>
+      </tr>`;
+    }).join('');
+  }
+  const modal = document.getElementById('expMonthModal');
+  if (modal) modal.classList.add('show');
+}
+function closeExpMonthDetail() {
+  document.getElementById('expMonthModal')?.classList.remove('show');
 }
 
 // 美甲 vs 美睫 饼图
@@ -11308,9 +11435,9 @@ function renderRepeatChart(year) {
     </div>`;
   }).join('')}
   <div style="display:flex;gap:16px;font-size:12px;color:var(--ink-2);margin-top:6px;flex-wrap:wrap;">
-    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#8CC3E3,#5AA9D9);border-radius:2px;margin-right:6px;"></i>新客（第1次）</span>
-    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#7CC4A4,#54A181);border-radius:2px;margin-right:6px;"></i>回头客（第2次）</span>
-    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#E8B98A,#D99B5E);border-radius:2px;margin-right:6px;"></i>老顾客（≥3次）</span>
+    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#9ED6B7,#7CC4A4);border-radius:2px;margin-right:6px;"></i>新客（第1次）</span>
+    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#F0CB8B,#E7B866);border-radius:2px;margin-right:6px;"></i>回头客（第2次）</span>
+    <span><i style="display:inline-block;width:10px;height:10px;background:linear-gradient(90deg,#8BC8EA,#6AA9D8);border-radius:2px;margin-right:6px;"></i>老顾客（≥3次）</span>
   </div>
   </div>`;
 }
